@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Poke Idle World - qualidade de vida",
+  "version": "0.1.0",
+  "description": "Lanca a pokebola sozinho assim que aparece um selvagem, respeitando o tempo de espera do jogo. Alt+Q abre o menu.",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://poke.idleworld.online/*"
+      ],
+      "js": [
+        "nucleo.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://poke.idleworld.online/*"
+      ],
+      "js": [
+        "captura.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

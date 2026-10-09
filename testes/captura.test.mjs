@@ -99,7 +99,7 @@ function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem
     // uma mutacao do DOM, que e o motor da ferramenta
     mexer: async () => {
       corpoObservador();
-      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 0));
     },
   };
 }

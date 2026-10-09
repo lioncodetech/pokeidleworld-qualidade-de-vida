@@ -83,7 +83,9 @@ export default [
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
-      globals: { console: 'readonly', URL: 'readonly' },
+      // `setTimeout` entra porque as bancas precisam esperar a fila de microtarefas esvaziar
+      // antes de conferir o que o modulo fez — a ferramenta agenda o seu trabalho em microtarefa.
+      globals: { console: 'readonly', URL: 'readonly', setTimeout: 'readonly' },
     },
     rules: { 'no-undef': 'error', 'no-unused-vars': 'warn' },
   },

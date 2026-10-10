@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Poke Idle World - qualidade de vida",
-  "version": "0.1.0",
-  "description": "Lanca a pokebola sozinho assim que aparece um selvagem, respeitando o tempo de espera do jogo. Alt+Q abre o menu.",
+  "version": "1.0.0",
+  "description": "Lanca a pokebola sozinho, faz o ciclo da loja, guarda cacadas e times e troca de cacada por nivel. Alt+Q abre o menu.",
   "permissions": [
     "storage"
   ],
@@ -21,7 +21,14 @@
         "https://poke.idleworld.online/*"
       ],
       "js": [
-        "captura.js"
+        "pausa.js",
+        "agenda.js",
+        "captura.js",
+        "loja.js",
+        "ciclo.js",
+        "cacadas.js",
+        "times.js",
+        "escada.js"
       ],
       "run_at": "document_idle"
     }

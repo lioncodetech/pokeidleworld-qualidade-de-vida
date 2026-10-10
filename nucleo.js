@@ -216,14 +216,48 @@
    * sem ela aqui, a unica ferramenta que nao daria para desligar seria justamente a que mais pesa.
    */
   const CATALOGO = [
-    // Uma ferramenta so, por enquanto. `efeito` troca o verbo do botao do meio: em vez de
-    // mostrar e esconder uma janela, ele liga e desliga o que ela faz — que e tudo o que ela tem.
+    // `efeito` troca o verbo do botao do meio: em vez de mostrar e esconder uma janela, ele
+    // liga e desliga o que a ferramenta faz — que e tudo o que a captura tem.
     {
       id: 'captura',
       nome: 'Captura automática',
       atalhos: 'Alt+C liga · Alt+V desliga',
       efeito: true,
       proprio: true,
+    },
+    // A loja tem janela propria (quantidades por item), entao o botao do meio mostra e esconde
+    // em vez de ligar um efeito: `efeito` fica de fora.
+    // Caçadas e Times tem janela propria, como a loja: o botao do meio mostra e esconde em vez
+    // de ligar um efeito, entao `efeito` fica de fora.
+    {
+      id: 'cacadas',
+      nome: 'Caçadas',
+      atalhos: 'Alt+W abre o painel',
+      proprio: true,
+    },
+    {
+      id: 'times',
+      nome: 'Times',
+      atalhos: 'Alt+T abre o painel',
+      proprio: true,
+    },
+    {
+      id: 'escada',
+      nome: 'Escada de caçadas',
+      atalhos: 'Alt+P abre o painel',
+      proprio: true,
+    },
+    {
+      id: 'loja',
+      nome: 'Loja do Mark',
+      atalhos: 'Alt+L abre o painel',
+      proprio: true,
+    },
+    // O ciclo nao tem janela nem estado ligado/desligado: e' uma acao que se dispara e acaba.
+    {
+      id: 'ciclo',
+      nome: 'Ciclo da loja',
+      atalhos: 'Alt+K roda o ciclo',
     },
   ];
   const modulos = CATALOGO.map((f) => ({ ...f, iniciar: null, vivo: false, erro: '' }));

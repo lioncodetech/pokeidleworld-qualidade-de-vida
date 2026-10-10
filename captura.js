@@ -67,6 +67,19 @@ PPX.modulo(
      * enquanto a captura esta' ligada. Esta ferramenta fica ligada horas: segurar a fila todo esse
      * tempo trancaria para sempre qualquer automacao que venha depois.
      */
+    // Tempo de reacao. Lancar a pokebola no mesmo instante em que o selvagem aparece e' a coisa
+    // menos humana que esta ferramenta faz, e a mais facil de ver de fora.
+    //
+    // **So' com a aba a' vista**, e isto nao e' preguica: em segundo plano o Chrome estrangula
+    // `setTimeout` para uma vez por minuto — a mesma razao pela qual o motor daqui e' um
+    // observador. Esperar ali trocaria uma captura discreta por uma captura que nao acontece. E
+    // numa janela escondida nao ha' ninguem a ver o compasso.
+    const REACAO = 420;
+    const visivel = () => document.visibilityState === 'visible';
+    const esperar = (ms) =>
+      globalThis.PPX?.pausa ? globalThis.PPX.pausa(ms) : new Promise((r) => setTimeout(r, ms));
+    const reagir = () => (visivel() ? esperar(REACAO) : Promise.resolve());
+
     const esperarAVez = async () => {
       const vez = globalThis.PPX?.vez;
       // Nucleo antigo, sem fila: segue como seguia antes, em vez de nao funcionar.
@@ -90,6 +103,7 @@ PPX.modulo(
       try {
         soltar = await esperarAVez();
         if (!soltar) return;
+        await reagir();
         // Entre pedir a vez e recebe-la o selvagem pode ter fugido ou o botao ter travado de
         // novo: quem decide e' o estado de agora, nao o de quando se pediu.
         const b = botaoLivre();

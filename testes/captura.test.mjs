@@ -12,8 +12,17 @@ import test from 'node:test';
 const fonte = readFileSync(new URL('../captura.js', import.meta.url), 'utf8');
 
 /** Pagina de mentira: so o que o modulo toca. */
-function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem = true } = {}) {
+function montarPagina({
+  ligado = true,
+  travado = false,
+  saldo = 100,
+  temSelvagem = true,
+  // Por omissao a aba esta' escondida, que e' como o utilizador joga: nove janelas, quase todas
+  // em segundo plano. E' tambem o caminho sem temporizador nenhum.
+  aVista = false,
+} = {}) {
   const cliques = [];
+  const adiados = [];
   const vezPedida = [];
   let vezSolta = 0;
 
@@ -33,6 +42,7 @@ function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem
     },
     body: { appendChild() {} },
     createElement: () => ({ style: {}, remove() {}, set textContent(v) {} }),
+    visibilityState: aVista ? 'visible' : 'hidden',
   };
 
   const armazem = new Map([['lioncode:pokeidleworld:captura', ligado ? '1' : '0']]);
@@ -77,7 +87,10 @@ function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem
       setItem: (k, v) => armazem.set(k, v),
     },
     () => 0,
-    () => 0,
+    (fn, ms) => {
+      adiados.push(ms || 0);
+      return globalThis.setTimeout(fn, 0);
+    },
     () => {},
     class {
       constructor(fn) {
@@ -90,6 +103,7 @@ function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem
 
   return {
     cliques,
+    adiados,
     vezPedida,
     solturas: () => vezSolta,
     anotado,
@@ -99,7 +113,9 @@ function montarPagina({ ligado = true, travado = false, saldo = 100, temSelvagem
     // uma mutacao do DOM, que e o motor da ferramenta
     mexer: async () => {
       corpoObservador();
-      await new Promise((r) => setTimeout(r, 0));
+      // duas voltas: uma para a microtarefa do observador, outra para o tempo de reacao
+      await new Promise((r) => setTimeout(r, 2));
+      await new Promise((r) => setTimeout(r, 2));
     },
   };
 }
@@ -159,4 +175,26 @@ test('o menu liga e desliga como o atalho', async () => {
     p.anotado.some(([id, v]) => id === 'captura' && v === true),
     'e o menu foi avisado do novo estado',
   );
+});
+
+
+test('com a aba a vista, espera um tempo de reacao antes de lancar', async () => {
+  // Lancar no mesmo instante em que o selvagem aparece e' a coisa menos humana que a ferramenta
+  // faz, e a mais facil de ver de fora.
+  const p = montarPagina({ ligado: true, aVista: true });
+  await p.mexer();
+  assert.equal(p.cliques.length, 1, 'lancou');
+  assert.ok(
+    p.adiados.some((ms) => ms >= 300),
+    `esperou antes de clicar (adiados: ${p.adiados.join(',')})`,
+  );
+});
+
+test('em segundo plano nao usa temporizador para esperar', async () => {
+  // O Chrome estrangula `setTimeout` para uma vez por minuto em aba oculta. Esperar ali trocaria
+  // uma captura discreta por uma captura que nao acontece.
+  const p = montarPagina({ ligado: true, aVista: false });
+  await p.mexer();
+  assert.equal(p.cliques.length, 1, 'lancou na mesma');
+  assert.ok(!p.adiados.some((ms) => ms >= 300), `nao adiou: ${p.adiados.join(',')}`);
 });

@@ -21,6 +21,34 @@
   const CHAVE_VEZ = 'lioncode:pokeidleworld:vez';
   const CHAVE_SUMICO = 'lioncode:pokeidleworld:sumico';
 
+  // O andar dos paineis do pacote. O CSS de cada um pede `Z_BASE`; `PPX.frente` reparte daqui
+  // para cima. Fica abaixo do maximo do CSS (2147483647) para haver para onde subir, e o menu
+  // continua acima de tudo: ele e' o controlo, e tem de se poder clicar sempre.
+  const Z_BASE = 2000000000;
+  const Z_TECTO = 2100000000;
+  let zDaFrente = Z_BASE;
+
+  const frente = (el) => {
+    if (!el || !el.style) return null;
+    zDaFrente = zDaFrente >= Z_TECTO ? Z_BASE + 1 : zDaFrente + 1;
+    el.style.zIndex = String(zDaFrente);
+    return zDaFrente;
+  };
+
+  /** As janelinhas que se anunciaram em `PPX.painel`, para recolocar quando a tela muda. */
+  const registados = [];
+
+  /**
+   * Recoloca as janelinhas a partir do canto guardado de cada uma.
+   *
+   * E' o mesmo que o menu sempre fez. Quem nunca foi arrastado nao tem canto guardado e nao e'
+   * tocado: fica no canto que o CSS dele pede, que ja' e' relativo a' borda. E escondido nao tem
+   * caixa para medir — por isso quem mostra um painel recoloca-o, com o `recolocar` devolvido.
+   */
+  function recolocarPaineis() {
+    for (const reg of registados) if (reg.pos) canto.aplicar(reg.el, reg.pos);
+  }
+
   const ler = (chave, padrao) => {
     try {
       return JSON.parse(localStorage.getItem(chave)) ?? padrao;
@@ -232,25 +260,43 @@
     {
       id: 'cacadas',
       nome: 'Caçadas',
-      atalhos: 'Alt+W abre o painel',
+      atalhos: 'Alt+W esconde · Alt+E mostra',
       proprio: true,
     },
     {
       id: 'times',
       nome: 'Times',
-      atalhos: 'Alt+T abre o painel',
+      atalhos: 'Alt+T esconde · Alt+Y mostra',
+      proprio: true,
+    },
+    {
+      id: 'arrumar',
+      nome: 'Arrumar os painéis',
+      atalhos: 'Alt+U esconde · Alt+J mostra · Alt+Shift+J arruma',
       proprio: true,
     },
     {
       id: 'escada',
       nome: 'Escada de caçadas',
-      atalhos: 'Alt+P abre o painel',
+      atalhos: 'Alt+B esconde · Alt+N mostra',
       proprio: true,
     },
     {
       id: 'loja',
       nome: 'Loja do Mark',
-      atalhos: 'Alt+L abre o painel',
+      atalhos: 'Alt+L esconde · Alt+M mostra',
+      proprio: true,
+    },
+    {
+      id: 'sem-grafico',
+      nome: 'Sem gráfico',
+      atalhos: 'Alt+G para · Alt+H volta',
+      // `efeito` e nao janela, e isto nao e' so' a palavra do botao. `comJanela()` filtra por
+      // `!m.efeito`, e sem esta linha o Alt+Z levava-a na conta das janelas: medido no jogo em
+      // 11/10/2026, o sumico ficou ["cacadas","times","escada","sem-grafico"] e o grafico voltou
+      // todo. Esconder as janelas nao e' pedir o desenho de volta.
+      efeito: true,
+      // Ela guarda o proprio estado, na chave dela, e corre do outro lado da fronteira.
       proprio: true,
     },
     // O ciclo nao tem janela nem estado ligado/desligado: e' uma acao que se dispara e acaba.
@@ -352,6 +398,111 @@
     /** O canto guardado, partilhado por todas as janelinhas do pacote. */
     canto,
 
+    /**
+     * Traz uma janelinha para a frente das outras do pacote.
+     *
+     * POR QUE ISTO MORA NO NUCLEO. Os paineis nasceram todos com o mesmo `z-index`, e com empate
+     * quem decide e' a ordem no DOM — ou seja, a ordem em que os ficheiros carregam. O painel em
+     * que se esta' a mexer ficava atras de outro, e nao havia nada a fazer senao fechar o de
+     * cima. Isto e' uma unica contagem crescente: duas contagens, uma por modulo, empatariam
+     * outra vez no primeiro clique.
+     *
+     * O numero comeca abaixo do maximo de propósito. Os paineis pedem `Z_BASE` no CSS, e daqui
+     * saem valores acima dele — se o CSS pedisse o maximo, nao haveria para onde subir. O tecto
+     * e' alto o bastante para nunca se alcançar numa sessao, e ainda assim ha' volta ao inicio:
+     * um contador que estoura em silencio deixaria de trazer nada para a frente.
+     */
+    frente: frente,
+
+    /**
+     * O CSS que todas as janelinhas do pacote partilham, com o prefixo de classe de cada uma.
+     *
+     * POR QUE ISTO MORA AQUI. As cinco janelinhas tinham a mesma folha de estilo copiada, com o
+     * prefixo trocado — sete regras literalmente iguais nas cinco. E copia deriva: o modo
+     * minimizado nasceu com 176px em tres painéis e 200px no quarto, um ganhou um separador que
+     * o outro nao tem, e a Loja ficou sem minimizar nenhum. O desenho do pacote passou a ter um
+     * dono; o que e' proprio de cada painel — o canto, a largura, as linhas dele — continua na
+     * folha dele, que vem depois e por isso ganha nos empates.
+     *
+     * O que entra aqui e' o que tem de ser igual: a moldura, a barra de arrastar, os botoes, o
+     * `×`, o separador, a linha de status, a barra de rolagem e o anel de foco.
+     */
+    estiloDePainel(pfx) {
+      const p = String(pfx || '').replace(/[^a-z0-9-]/gi, '');
+      if (!p) return '';
+      return [
+        // A moldura. Sem canto nem largura de proposito: isso e' de cada painel.
+        `.${p}{position:fixed;z-index:${Z_BASE};max-height:70vh;overflow:auto;`,
+        'background:#11151df2;color:#e6e9ef;font:13px system-ui,sans-serif;',
+        'border:1px solid #3a4152;border-radius:10px;padding:12px 13px;box-shadow:0 8px 26px #0009;',
+        // A barra de rolagem nativa num painel escuro e' uma faixa clara de 17px: aqui ela fica
+        // fina e da cor da moldura. `scrollbar-*` para o Firefox, `::-webkit-*` para o Chrome.
+        'scrollbar-width:thin;scrollbar-color:#3a4152 transparent}',
+        `.${p}::-webkit-scrollbar{width:9px;height:9px}`,
+        `.${p}::-webkit-scrollbar-track{background:transparent}`,
+        `.${p}::-webkit-scrollbar-thumb{background:#3a4152;border-radius:5px}`,
+        `.${p}::-webkit-scrollbar-thumb:hover{background:#4b5467}`,
+        `.${p} h4{margin:0;font-size:13px;letter-spacing:.3px}`,
+        `.${p}-barra{display:flex;align-items:center;justify-content:space-between;cursor:move;`,
+        'user-select:none;margin:-4px -4px 6px}',
+        `.${p} button{width:100%;margin-top:8px;background:#1d2534;color:#e6e9ef;`,
+        'border:1px solid #3a4152;border-radius:6px;padding:7px;font:13px system-ui,sans-serif;',
+        'cursor:pointer}',
+        `.${p} button:hover{background:#273145}`,
+        `.${p}-x{width:auto!important;margin:0!important;padding:1px 7px!important;line-height:1;`,
+        'font-size:15px!important;background:transparent!important;border:none!important;',
+        'opacity:.6;cursor:pointer}',
+        `.${p}-x:hover{opacity:1;background:#273145!important}`,
+        `.${p}-sep{margin:11px 0 5px;border-top:1px solid #2a3140;padding-top:8px;font-size:11px;`,
+        'opacity:.65;text-transform:uppercase;letter-spacing:.6px}',
+        `.${p}-status{margin-top:9px;font-size:11.5px;opacity:.8;min-height:15px;line-height:1.35}`,
+        // Anel de foco. O painel passou a vir para a frente tambem por teclado, e sem isto quem
+        // anda de Tab nao ve' onde esta'. O `:focus-visible` nao aparece ao clicar com o rato.
+        `.${p} :focus-visible{outline:2px solid #6aa9ff;outline-offset:1px}`,
+        // Largura do minimizado, igual nos cinco.
+        `.${p}.compacto{width:176px}`,
+      ].join('');
+    },
+
+    /**
+     * Registra uma janelinha: ela vem para a frente ao ser tocada e nao fica fora da tela quando
+     * a janela do navegador muda de tamanho.
+     *
+     * `guardar(pos)` e' opcional e recebe `{x, y}` em pixels do canto de cima a' esquerda quando
+     * o recorte mexeu no painel — sem isto o lugar guardado ficaria a apontar para fora da tela.
+     *
+     * POR QUE O RECORTE E' PRECISO. O LionMultInstance rearranja as views a toda a hora, e isso
+     * encolhe a janela. As janelinhas aplicavam a posicao guardada **so' na montagem**: encolher
+     * depois disso deixava o painel pendurado para fora, sem jeito de o arrastar de volta ate' um
+     * F5. O menu deste nucleo ja' se recolocava; as cinco janelinhas nao.
+     */
+    painel(el, { alca, pos, guardar } = {}) {
+      if (!el || !el.addEventListener) return () => false;
+      const aFrente = () => frente(el);
+      // `true` para pegar o clique na descida, antes de qualquer campo o consumir, e `focusin`
+      // para quem chega pelo teclado.
+      el.addEventListener('mousedown', aFrente, true);
+      el.addEventListener('focusin', aFrente, true);
+
+      const reg = { el, pos: canto.doGuardado(pos) };
+      registados.push(reg);
+      const recolocar = () => canto.aplicar(el, reg.pos);
+
+      if (alca)
+        arrastavel(alca, el, {
+          aoSoltar: (p) => {
+            reg.pos = p;
+            if (guardar) guardar(p);
+            // Medir e aplicar outra vez encaixa o painel no canto exato — e' o que o menu faz,
+            // e e' o que faz o lugar guardado e o lugar visto serem o mesmo.
+            recolocar();
+          },
+        });
+
+      recolocar();
+      return recolocar;
+    },
+
     /** A fila: quem quer agir no jogo pede a vez aqui. Ver o bloco "a vez", acima. */
     vez: VEZ,
 
@@ -391,6 +542,34 @@
       agendarMontagem();
     },
   };
+
+  /**
+   * A ponte para a ferramenta que corre no mundo da pagina.
+   *
+   * `sem-grafico` precisa do `window.__engine`, que e' uma variavel do jogo — e um content script
+   * normal tem o seu proprio `window` e nao a ve'. Por isso ela corre em `world: MAIN`, do outro
+   * lado da fronteira, onde nao existe este `PPX`.
+   *
+   * O que atravessa a fronteira sao eventos do DOM, e e' so' isso que passa aqui: o menu manda
+   * um `:mandar` quando o botao e' clicado, a ferramenta devolve um `ppx:sem-grafico` sempre que
+   * muda — por evento ou por atalho — e o menu repinta com o que ela disser. Nenhum dos dois
+   * lados adivinha o estado do outro.
+   */
+  (() => {
+    const m = modulos.find((x) => x.id === 'sem-grafico');
+    if (!m) return;
+    // Ela nao e' iniciada por nos: ja' esta' a correr quando esta linha corre, ou nao esta' e
+    // nada do que fizermos aqui a poe de pe'.
+    m.vivo = true;
+    m.aplicar = (sim) =>
+      dispatchEvent(new CustomEvent('ppx:sem-grafico:mandar', { detail: { ativo: sim } }));
+    addEventListener('ppx:sem-grafico', (e) => {
+      const d = (e && e.detail) || {};
+      globalThis.PPX.anotar('sem-grafico', d.mundo === true || d.estatico === true);
+    });
+    // O menu pode subir depois dela, e entao perdeu o anuncio de arranque: pergunta-se.
+    dispatchEvent(new Event('ppx:sem-grafico:pergunta'));
+  })();
 
   const iniciarModulo = (m) => {
     if (m.vivo || m.erro || !m.iniciar) return;
@@ -708,57 +887,92 @@
    * coisas, e quem decide e' a distancia: andou menos de 4px, foi um clique e o menu abre; andou
    * mais, foi arrasto e o clique nao conta.
    */
-  function arrastavel(pegador, movido, aoClicar) {
+  /**
+   * Arrastar `movido` pelo `pegador`, guardando o lugar pelo canto mais proximo.
+   *
+   * `aoSoltar(pos)` recebe o canto medido ao fim de um arrasto de verdade; `aoClicar` corre
+   * quando o ponteiro nao andou. Era so' do menu — `pos`, `CHAVE_POS` e `colocar` estavam
+   * presos aqui dentro —, e e' por isso que as cinco janelinhas tiveram de escrever o arrasto
+   * delas outra vez, cada uma com `mousedown` na janela em vez de captura de ponteiro.
+   */
+  /** O que responde a clique por conta propria e por isso nunca comeca um arrasto. */
+  const CLICAVEL = 'button,input,select,textarea,a,label';
+
+  function arrastavel(pegador, movido, { aoSoltar, aoClicar } = {}) {
     let dx = 0;
     let dy = 0;
     let partida = null;
     let andou = false;
+    let capturado = false;
     pegador.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      // Quem tem clique proprio dentro do pegador fica de fora. A barra dos paineis leva o `–` e
+      // o `×` dentro dela, e um arrasto que comecasse neles seria um clique roubado. O pegador
+      // que e' ele proprio um botao — a abinha do menu — continua a valer, por isso a comparacao.
+      if (e.target !== pegador && e.target?.closest?.(CLICAVEL)) return;
       const r = movido.getBoundingClientRect();
       dx = e.clientX - r.left;
       dy = e.clientY - r.top;
       partida = { x: e.clientX, y: e.clientY };
       andou = false;
-      pegador.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
     pegador.addEventListener('pointermove', (e) => {
       if (!partida) return;
       if (!andou && Math.abs(e.clientX - partida.x) + Math.abs(e.clientY - partida.y) < 4) return;
-      andou = true;
+      if (!andou) {
+        andou = true;
+        // A captura entra aqui, e nao no `pointerdown`: ela e' o que faz o arrasto sobreviver ao
+        // ponteiro sair da janela, e e' tambem o que leva o `click` para o pegador em vez de
+        // para o que esta' debaixo do dedo. Enquanto ainda pode ser um clique, nao se captura.
+        try {
+          pegador.setPointerCapture(e.pointerId);
+          capturado = true;
+        } catch {
+          /* sem captura: o arrasto ainda anda, so' nao sobrevive a sair da janela */
+        }
+      }
       dentro(movido, e.clientX - dx, e.clientY - dy);
     });
     const soltar = (e) => {
       if (!partida) return;
       partida = null;
-      try {
-        pegador.releasePointerCapture(e.pointerId);
-      } catch {
-        /* ponteiro ja solto */
+      if (capturado) {
+        capturado = false;
+        try {
+          pegador.releasePointerCapture(e.pointerId);
+        } catch {
+          /* ponteiro ja solto */
+        }
       }
       if (!andou) {
         if (aoClicar) aoClicar();
         return;
       }
-      pos = canto.medir(movido);
-      gravar(CHAVE_POS, pos);
-      colocar();
+      if (aoSoltar) aoSoltar(canto.medir(movido));
     };
     pegador.addEventListener('pointerup', soltar);
     pegador.addEventListener('pointercancel', soltar);
   }
 
-  arrastavel(menu.querySelector('.alca'), menu);
+  const guardarOCanto = (p) => {
+    pos = p;
+    gravar(CHAVE_POS, pos);
+    colocar();
+  };
+  arrastavel(menu.querySelector('.alca'), menu, { aoSoltar: guardarOCanto });
   // O menu e o botao partilham o mesmo canto guardado: arrastar um leva o outro junto, senao
   // minimizar faria a janelinha reaparecer longe de onde o menu estava.
-  arrastavel(aba, aba, () => abrir(true));
+  arrastavel(aba, aba, { aoSoltar: guardarOCanto, aoClicar: () => abrir(true) });
 
   // Rearranjar as views muda o tamanho da janela; sem isto o menu ficaria pendurado para fora.
   let ajuste = 0;
   addEventListener('resize', () => {
     clearTimeout(ajuste);
-    ajuste = setTimeout(colocar, 150);
+    ajuste = setTimeout(() => {
+      colocar();
+      recolocarPaineis();
+    }, 150);
   });
 
   // Alt+Q abre e fecha o menu. O atalho para aqui: deixar passar dispararia tambem o que o jogo

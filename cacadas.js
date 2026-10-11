@@ -13,7 +13,7 @@ PPX.modulo(
   {
     id: 'cacadas',
     nome: 'Caçadas',
-    atalhos: 'Alt+W abre o painel',
+    atalhos: 'Alt+W esconde · Alt+E mostra',
     proprio: true,
   },
   () => {
@@ -65,22 +65,76 @@ PPX.modulo(
     }
 
     /** Abre o mapa e clica no marcador da caçada. */
+    /**
+     * As quatro regioes do mapa, e os marcadores de cada uma.
+     *
+     * Medido em 10/10/2026: as placas sao `.map-areas .map-plate`, o nome esta' no `alt` da
+     * imagem de dentro ("Kanto", "Outland", "Orre", "Nightmare"), a aberta leva `on` e as que o
+     * nivel ainda nao destranca levam `locked` — mas **continuam clicaveis**, e da' para olhar
+     * o mapa delas.
+     *
+     * O que importa: **o mapa so' desenha os marcadores da regiao aberta.** Era por isso que
+     * mandar ir a uma caçada de Outland nao fazia nada — o marcador nao existia no DOM, e a
+     * ferramenta dizia "nao achei no mapa" depois de esperar doze segundos por ele. Trocar de
+     * placa leva cerca de 1 s a redesenhar: Kanto tinha 227 marcadores, Outland 47, Orre 72.
+     */
+    const placasDoMapa = () => [...document.querySelectorAll('.map-areas .map-plate')];
+    const nomeDaPlaca = (b) => (b.querySelector('img')?.alt || '').trim();
+    const primeiroMarcador = () => document.querySelector('.hunt-marker')?.title || '';
+
+    /**
+     * Procura o marcador na regiao aberta e, se nao estiver la', nas outras.
+     *
+     * Devolve `{ achou, regiao, travada }`. `regiao` fica vazia quando estava mesmo na que ja'
+     * estava aberta — nao se diz "fui a Kanto" a quem ja' estava em Kanto.
+     */
+    async function procurarNoMapa(marcador) {
+      if (marcador()) return { achou: true, regiao: '', travada: false };
+      for (const placa of placasDoMapa()) {
+        if (placa.classList?.contains?.('on')) continue;
+        const antes = primeiroMarcador();
+        placa.click();
+        // Espera os marcadores trocarem, e nao um relogio: a regiao nova leva ~1 s a desenhar.
+        await ateQue(() => primeiroMarcador() !== antes, 5000);
+        if (marcador())
+          return {
+            achou: true,
+            regiao: nomeDaPlaca(placa),
+            travada: placa.classList?.contains?.('locked') === true,
+          };
+      }
+      return { achou: false, regiao: '', travada: false };
+    }
+
+    /**
+     * Abre o mapa, acha a caçada — em qualquer uma das quatro regioes — e clica nela.
+     *
+     * Devolve `{ ok, achou, regiao, travada }`: quem chama precisa de saber a diferenca entre
+     * "nao existe esse lugar" e "existe, mas e' em Orre, que o seu nivel ainda nao destranca".
+     */
     async function viajar(hunt) {
-      if (!hunt) return false;
+      const nada = { ok: false, achou: false, regiao: '', travada: false };
+      if (!hunt) return nada;
       await fecharJanela();
       const mapa = botoes().find((b) => (b.title || '').trim() === 'Mapa');
-      if (!mapa) return false;
+      if (!mapa) return nada;
       mapa.click();
       const marcador = () =>
         [...document.querySelectorAll('.hunt-marker')].find(
           (m) => (m.title || '') === `Viajar para ${hunt}` || m.textContent.trim() === hunt,
         );
-      if (!(await ateQue(() => !!marcador(), 12000))) return false;
+      // O mapa e' uma lista grande e demora a montar: espera haver marcadores, nao um relogio.
+      if (!(await ateQue(() => document.querySelectorAll('.hunt-marker').length > 0, 12000)))
+        return nada;
+
+      const achado = await procurarNoMapa(marcador);
+      if (!achado.achou) return { ...nada, ...achado };
+
       // Um instante antes de clicar, como quem olha o mapa e so' depois escolhe.
       await esperar(800);
       marcador().click();
       await ateQue(() => local() === hunt, 20000);
-      return true;
+      return { ...achado, ok: true };
     }
 
     // --- o que se guarda ----------------------------------------------------------------------
@@ -163,6 +217,20 @@ PPX.modulo(
     }
 
     /**
+     * Manda curar a equipe, se houver alguem caido.
+     *
+     * Quem sabe curar e' a ferramenta Times: a Nurse Joy mora no mesmo Centro Pokemon de
+     * Cerulean que o Deposito, e duas ferramentas a procurarem o mesmo NPC por conta propria
+     * divergiriam no primeiro dia. Sem os Times ligados, segue-se como antes — o jogo recusa a
+     * viagem e a frase da equipe desmaiada ainda esta' la' para explicar.
+     */
+    async function curarEquipe(aviso) {
+      const times = globalThis.PPX?.times;
+      if (!times?.curar || !times.alguemCaido?.()) return '';
+      return times.curar(aviso, { voltar: false });
+    }
+
+    /**
      * Leva a' caçada, montando antes o time que ela pedir.
      *
      * Ja' estando la', ainda ha' o que fazer se houver time: montar. Por isso o "voce ja esta
@@ -221,14 +289,21 @@ PPX.modulo(
       if (!posto.ok) return `Parei: nao montei o time "${escolhido}" — ${posto.erro}`;
       if (jaAqui) return `Time "${escolhido}" montado. Voce ja estava em "${hunt}".`;
 
+      // Equipe caida nao viaja: o jogo recusa e **nao diz que recusou** — po-e um aviso na tela e
+      // fica quieto. Entao cura-se antes de tentar, em vez de descobrir depois pelo aviso. Quem
+      // trocou de time ja' passou pela Joy durante a montagem; esta aqui e' para quem viajou sem
+      // trocar nada, que era o caso que ficava de fora.
+      const falta = await curarEquipe(aviso);
+      if (falta) return `Parei: ${falta}`;
+
       const soltar = await esperarAVez();
       if (!soltar) return 'Outra ferramenta esta agindo. Tente de novo.';
       try {
         const parar = escutarOJogo();
-        const ok = await viajar(hunt);
-        if (!ok) {
+        const viagem = await viajar(hunt);
+        if (!viagem.ok) {
           parar();
-          return `Nao achei "${hunt}" no mapa. Voce ficou onde estava.`;
+          return `Nao achei "${hunt}" no mapa, em nenhuma das regioes. Voce ficou onde estava.`;
         }
         await esperar(800);
         // Confere a chegada em vez de a assumir: o clique no marcador pode nao ter pegado, e
@@ -243,6 +318,10 @@ PPX.modulo(
             'Parei: sua equipe esta desmaiada, e o jogo nao deixa sair assim. Cure com a Nurse ' +
             'Joy (o "Conversar" dela, em Cerulean) e tente de novo.'
           );
+        // Uma regiao travada nao diz que recusou: ela so' nao te leva. Dizer onde fica a caçada
+        // e porque ela nao vale e' a diferenca entre um erro e um diagnostico.
+        if (viagem.travada)
+          return `"${hunt}" fica em ${viagem.regiao}, que o seu nivel ainda nao destranca.`;
         return `Cliquei para viajar, mas o jogo diz "${agora || 'nada'}". Confira.`;
       } finally {
         soltar();
@@ -255,6 +334,8 @@ PPX.modulo(
     // visuais seria ruido. As classes sao `cjx` para nao disputar com as `ljx`.
 
     let painel = null;
+    /** Devolvido pelo nucleo: recoloca o painel no canto guardado. */
+    let recolocar = () => false;
     let visivel = false;
 
     const diz = (txt) => {
@@ -262,20 +343,14 @@ PPX.modulo(
       if (alvo) alvo.textContent = txt;
     };
 
-    const CSS = [
+    // A moldura, a barra, os botoes, o separador, o status, a rolagem e o foco vem do
+    // nucleo: cinco copias da mesma folha derivam, e derivaram. Aqui fica o que e' deste
+    // painel — e vem depois, por isso ganha nos empates.
+    const CSS = (globalThis.PPX?.estiloDePainel?.('cjx') || '') + [
       // Cada painel nasce num canto proprio: de baixo a' direita e' o painel de captura do
       // jogo, e empilhar os quatro no mesmo lugar escondia um atras do outro. Quem arrasta
       // manda — `cfg.pos` passa por cima disto.
-      '.cjx{position:fixed;right:18px;top:96px;z-index:2147483646;width:248px;max-height:70vh;',
-      'overflow:auto;background:#11151df2;color:#e6e9ef;font:13px system-ui,sans-serif;',
-      'border:1px solid #3a4152;border-radius:10px;padding:12px 13px;box-shadow:0 8px 26px #0009}',
-      '.cjx-barra{display:flex;align-items:center;justify-content:space-between;cursor:move;',
-      'user-select:none;margin:-4px -4px 6px}',
-      '.cjx h4{margin:0;font-size:13px;letter-spacing:.3px}',
-      '.cjx-x{width:auto!important;margin:0!important;padding:1px 7px!important;line-height:1;',
-      'font-size:15px!important;background:transparent!important;border:none!important;',
-      'opacity:.6;cursor:pointer}',
-      '.cjx-x:hover{opacity:1;background:#273145!important}',
+      '.cjx{right:18px;top:96px;width:248px}',
       '.cjx-l{display:flex;align-items:center;gap:6px;margin:4px 0}',
       '.cjx-l b{flex:1;font-size:12.5px;color:#9fd0ff;font-weight:600;overflow:hidden;',
       'text-overflow:ellipsis;white-space:nowrap}',
@@ -287,62 +362,20 @@ PPX.modulo(
       'font:11.5px system-ui,sans-serif}',
       // Sem time escolhido o seletor e' so' ruido: fica apagado ate' valer alguma coisa.
       '.cjx-time.sem{color:#8b97a8}',
-      '.cjx button{width:100%;margin-top:8px;background:#1d2534;color:#e6e9ef;',
-      'border:1px solid #3a4152;border-radius:6px;padding:7px;font:13px system-ui,sans-serif;',
-      'cursor:pointer}',
-      '.cjx button:hover{background:#273145}',
-      '.cjx-status{margin-top:9px;font-size:11.5px;opacity:.8;min-height:15px;line-height:1.35}',
       // Modo compacto: fica o nome da caçada e o Ir, que e' o uso de todo dia. Guardar e apagar
       // sao de arrumar a lista, e arrumar a lista nao se faz todo dia.
-      '.cjx.compacto{width:176px}',
       '.cjx.compacto .cjx-guardar,.cjx.compacto .cjx-status,.cjx.compacto .cjx-time,',
       '.cjx.compacto .cjx-l .cjx-fora{display:none}',
       '.cjx.compacto .cjx-l{margin:2px 0}',
     ].join('');
 
-    /** Arrastar pela barra, e o lugar sobrevive ao F5. */
-    function arrastarPor(alca) {
-      alca.addEventListener('mousedown', (ev) => {
-        if (ev.button !== 0) return;
-        ev.preventDefault();
-        const r = painel.getBoundingClientRect();
-        const dx = ev.clientX - r.left;
-        const dy = ev.clientY - r.top;
-        const mover = (e) => {
-          const x = Math.min(Math.max(0, e.clientX - dx), innerWidth - 60);
-          const y = Math.min(Math.max(0, e.clientY - dy), innerHeight - 40);
-          painel.style.left = `${x}px`;
-          painel.style.top = `${y}px`;
-          painel.style.right = 'auto';
-          painel.style.bottom = 'auto';
-        };
-        const solto = () => {
-          removeEventListener('mousemove', mover);
-          removeEventListener('mouseup', solto);
-          cfg.pos = { x: parseInt(painel.style.left, 10), y: parseInt(painel.style.top, 10) };
-          gravar();
-        };
-        addEventListener('mousemove', mover);
-        addEventListener('mouseup', solto);
-      });
-    }
-
-    /** Devolve o painel para onde foi largado, se aquele lugar ainda existe nesta tela. */
-    function aplicarPosicao() {
-      const p = cfg.pos;
-      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
-      if (p.x > innerWidth - 60 || p.y > innerHeight - 40) return;
-      painel.style.left = `${p.x}px`;
-      painel.style.top = `${p.y}px`;
-      painel.style.right = 'auto';
-      painel.style.bottom = 'auto';
-    }
-
     /** O modo guardado, porque quem prefere um modo prefere sempre. */
     function aplicarModo() {
       if (!painel) return;
       painel.classList.toggle('compacto', cfg.compacto === true);
-      const bt = painel.querySelector('.cjx-barra button');
+      // Pela classe, nao pela posicao: `.cjx-barra button` era o PRIMEIRO botao da barra, e um
+      // botao novo antes dele poria o `–` no `×`.
+      const bt = painel.querySelector('.cjx-min');
       if (!bt) return;
       bt.textContent = cfg.compacto ? '□' : '–';
       bt.title = cfg.compacto ? 'Mostrar tudo' : 'Minimizar';
@@ -446,7 +479,7 @@ PPX.modulo(
       // Dois botoes, e eles nao sao a mesma coisa: o `–` encolhe a janela para o uso de todo dia
       // e ela continua a' vista; o `×` esconde. Quem minimiza quer continuar a ver a lista.
       const encolher = document.createElement('button');
-      encolher.className = 'cjx-x';
+      encolher.className = 'cjx-x cjx-min';
       encolher.addEventListener('click', () => {
         cfg.compacto = !cfg.compacto;
         gravar();
@@ -463,7 +496,6 @@ PPX.modulo(
       cantos.append(encolher, fechar);
       barra.append(titulo, cantos);
       painel.appendChild(barra);
-      arrastarPor(barra);
 
       const lista = document.createElement('div');
       lista.className = 'cjx-lista';
@@ -482,8 +514,25 @@ PPX.modulo(
       status.className = 'cjx-status';
       painel.appendChild(status);
 
+      // Em cima das outras ao ser tocado, e nunca pendurado para fora quando a janela encolhe.
+      // Quem faz as duas coisas e' o nucleo: eram cinco copias, e o recorte do `resize` nao
+      // existia em nenhuma delas.
       document.body.appendChild(painel);
-      aplicarPosicao();
+
+      // Arrastar, lembrar o lugar, vir para a frente ao ser tocado e nao ficar pendurado para
+      // fora quando a janela encolhe: tudo isto e' do nucleo. Eram cinco copias, cada uma com
+      // `mousedown` na janela (que perde o arrasto se o ponteiro sair) e pixels do canto de cima
+      // a' esquerda (que nao sobrevivem a encolher a janela). O `recolocar` serve para quando o
+      // painel volta a' vista: escondido ele nao tem caixa para medir.
+      recolocar =
+        globalThis.PPX?.painel?.(painel, {
+          alca: barra,
+          pos: cfg.pos,
+          guardar: (p) => {
+            cfg.pos = p;
+            gravar();
+          },
+        }) || (() => false);
       aplicarModo();
       pintarLista();
       return painel;
@@ -505,6 +554,10 @@ PPX.modulo(
       }
       if (visivel) {
         montar().style.display = 'block';
+        globalThis.PPX?.frente?.(painel);
+        // Escondido nao tem caixa para medir: se a janela mudou de tamanho enquanto ele estava
+        // fora, e' agora que o canto guardado volta a valer.
+        recolocar();
         pintarLista();
       } else if (painel) painel.style.display = 'none';
       globalThis.PPX?.anotar?.('cacadas', visivel);
@@ -514,13 +567,17 @@ PPX.modulo(
       'keydown',
       (e) => {
         if (!e.altKey || e.ctrlKey || e.shiftKey) return;
-        if (e.key.toLowerCase() !== 'w') return;
-        // Campo de texto nao dispara atalho: o jogo tem chat, e um "w" ali nao e' um comando.
+        const tecla = e.key.toLowerCase();
+        if (tecla !== 'w' && tecla !== 'e') return;
+        // Campo de texto nao dispara atalho: o jogo tem chat, e uma letra ali nao e' um comando.
         const t = e.target;
-        if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+        if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)))
+          return;
         e.preventDefault();
         e.stopPropagation();
-        mostrar(!visivel);
+        // Duas teclas, e nao uma que alterna: com uma so' e' preciso olhar para o ecra' antes de
+        // a usar, porque ela faz o contrario do que fez da ultima vez.
+        mostrar(tecla === 'e');
       },
       true,
     );

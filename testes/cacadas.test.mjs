@@ -14,6 +14,10 @@ const fonte = readFileSync(new URL('../cacadas.js', import.meta.url), 'utf8');
 function no(cls, texto = '', extra = {}) {
   return {
     className: cls,
+    // As placas do mapa distinguem-se por classe: `on` e' a regiao aberta e `locked` e' a que o
+    // nivel ainda nao destranca. Sem `classList`, o modulo nao via nem uma nem outra.
+    classList: { contains: (c) => cls.split(' ').includes(c) },
+
     textContent: texto,
     innerText: texto,
     title: '',
@@ -69,6 +73,11 @@ function montar({
   aqui = 'Route 1',
   chegaEm = undefined,
   noMapa = ['Route 1'],
+  // O mapa por regiao: `{ Kanto: [...], Outland: [...] }`. Sem isto, tudo fica na regiao aberta.
+  regioes = null,
+  regiaoAberta = null,
+  // As que o nivel do treinador ainda nao destranca. Da' para olhar o mapa delas; viajar, nao.
+  travadas = [],
   semMapa = false,
   vezDe = null,
   // Caçadas ja' guardadas antes desta sessao, como estao no armazenamento.
@@ -99,17 +108,48 @@ function montar({
 
   const btMapa = no('', 'Mapa');
   btMapa.title = 'Mapa';
-  const marcadores = noMapa.map((nome) => {
+
+  /**
+   * O mapa com as suas quatro regioes — medido em 10/10/2026.
+   *
+   * **So' os marcadores da regiao aberta existem no DOM.** E' a razao de ser deste arreio: era
+   * por isso que mandar ir a uma caçada de Outland nao fazia nada, e um mapa de mentira com
+   * todos os marcadores sempre presentes daria a ferramenta quebrada por boa.
+   */
+  const marcadorDe = (nome) => {
     const m = no('hunt-marker', nome);
     m.title = `Viajar para ${nome}`;
     m.aoClicar = () => {
+      // Regiao travada nao leva ninguem: o jogo nao reclama, so' nao te move.
+      if (travadas.includes(aberta)) return;
       viagens.push(nome);
       if (chegaEm !== null) local = chegaEm === undefined ? nome : chegaEm;
       if (jogoDiz) mostrarNaTela(jogoDiz, false);
       if (chatDiz) mostrarNaTela(chatDiz, true);
     };
     return m;
-  });
+  };
+  // Sem `regioes`, tudo o que esta' em `noMapa` fica na regiao aberta: os testes antigos nao
+  // sabem o que e' regiao, e nao tem de saber.
+  const mapa = regioes || { Kanto: noMapa };
+  const nomesDasRegioes = Object.keys(mapa);
+  let aberta = regiaoAberta || nomesDasRegioes[0];
+  const marcadores = () => (mapa[aberta] || []).map(marcadorDe);
+
+  const trocasDePlaca = [];
+  const placas = () =>
+    nomesDasRegioes.map((nome) => {
+      const b = no(
+        `map-plate${nome === aberta ? ' on' : ''}${travadas.includes(nome) ? ' locked' : ''}`,
+        '',
+      );
+      b.querySelector = (sel) => (sel === 'img' ? { alt: nome } : null);
+      b.aoClicar = () => {
+        trocasDePlaca.push(nome);
+        aberta = nome;
+      };
+      return b;
+    });
 
   // Um MutationObserver de mentira, com a peneira que importa: um no' dentro do chat sabe dizer
   // que esta' dentro do chat, e e' isso que o modulo usa para nao confundir conversa com
@@ -140,8 +180,9 @@ function montar({
     body: noDom(),
     querySelector: (sel) => (sel === '.phud-tloc' ? tloc : null),
     querySelectorAll: (sel) => {
-      if (sel === 'button') return semMapa ? [] : [btMapa, ...marcadores];
-      if (sel === '.hunt-marker') return marcadores;
+      if (sel === 'button') return semMapa ? [] : [btMapa, ...marcadores()];
+      if (sel === '.hunt-marker') return semMapa ? [] : marcadores();
+      if (sel === '.map-areas .map-plate') return semMapa ? [] : placas();
       return [];
     },
     addEventListener: () => {},
@@ -184,7 +225,14 @@ function montar({
     mod,
   );
 
-  return { api: mod.exports, viagens, guardado, ondeEsta: () => local };
+  return {
+    api: mod.exports,
+    viagens,
+    guardado,
+    ondeEsta: () => local,
+    // Por onde o mapa passou: prova que ele NAO troca de regiao quando nao precisa.
+    trocasDePlaca: () => [...trocasDePlaca],
+  };
 }
 
 test('guarda a caçada onde o jogador esta', () => {
@@ -475,4 +523,58 @@ test('mandar vazio e dizer "nao troque o time"', async () => {
   await p.api.ir('Route 7', () => {}, { time: '' });
 
   assert.deepEqual(chamadas, [], 'a caçada pedia "hunt", e quem chamou disse que nao');
+});
+
+// --------------------------------------------------------------- as quatro regioes do mapa
+
+const MUNDO = {
+  Kanto: ['Meowth', 'Persian'],
+  Outland: ['Brave Venusaur'],
+  Orre: ['Shadow Lugia'],
+};
+
+test('caçada noutra regiao: troca de placa e vai', async () => {
+  // O mapa so' desenha os marcadores da regiao aberta. Sem procurar nas outras, a ferramenta
+  // esperava doze segundos por um marcador que nunca ia existir e dizia "nao achei no mapa".
+  const p = montar({ aqui: 'Meowth', regioes: MUNDO, regiaoAberta: 'Kanto' });
+
+  const r = await p.api.ir('Brave Venusaur', () => {}, { time: '' });
+
+  assert.match(r, /Em "Brave Venusaur"/, r);
+  assert.deepEqual(p.viagens, ['Brave Venusaur']);
+  // Uma troca, e so' a que serviu: clicar na regiao que ja' estava aberta custaria os cinco
+  // segundos de espera por um redesenho que nunca vem.
+  assert.deepEqual(p.trocasDePlaca(), ['Outland']);
+});
+
+test('caçada na regiao ja aberta: nao mexe nas placas', async () => {
+  const p = montar({ aqui: 'Meowth', regioes: MUNDO, regiaoAberta: 'Kanto' });
+
+  assert.match(await p.api.ir('Persian', () => {}, { time: '' }), /Em "Persian"/);
+  assert.deepEqual(p.trocasDePlaca(), [], 'nao havia por que trocar de regiao');
+});
+
+test('regiao travada: diz onde fica, em vez de "cliquei e nada"', async () => {
+  // A regiao travada deixa olhar o mapa e nao deixa viajar — e nao reclama, so' nao te move.
+  const p = montar({
+    aqui: 'Meowth',
+    regioes: MUNDO,
+    regiaoAberta: 'Kanto',
+    travadas: ['Orre'],
+    chegaEm: null,
+  });
+
+  const r = await p.api.ir('Shadow Lugia', () => {}, { time: '' });
+
+  assert.match(r, /fica em Orre, que o seu nivel ainda nao destranca/, r);
+  assert.deepEqual(p.viagens, []);
+});
+
+test('caçada que nao existe em regiao nenhuma', async () => {
+  const p = montar({ aqui: 'Meowth', regioes: MUNDO, regiaoAberta: 'Kanto' });
+
+  const r = await p.api.ir('Mewtwo', () => {}, { time: '' });
+
+  assert.match(r, /em nenhuma das regioes/, r);
+  assert.deepEqual(p.viagens, []);
 });

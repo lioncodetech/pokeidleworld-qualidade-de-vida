@@ -150,8 +150,13 @@ function montar({
   // Em Cerulean ha' tres NPC e todas as placas dizem "Conversar"; a da Joy nao e' a primeira
   // aqui de proposito, para o teste nao dar por boa uma ferramenta que dependa da ordem.
   semJoy = false,
+  // A Joy responde, o botao clica — e a equipe continua caida. Quem confere o clique da' isto
+  // por curado; quem confere a barra de vida, nao.
+  curaFalha = false,
   // Como a escolha "a' vista / oculta" ficou guardada da ultima vez; undefined = nunca escolheu.
   visivelCru = undefined,
+  // A aba do jogo em segundo plano, que e' como se joga com varias janelas abertas.
+  oculto = false,
 } = {}) {
   // O que a ferramenta contou ao menu, e o que o menu pode mandar ela fazer.
   const anotados = {};
@@ -188,6 +193,7 @@ function montar({
   const btMapa = { title: 'Mapa', textContent: '', click() {} };
 
   // --- a Nurse Joy, e a vida da equipe no HUD -------------------------------------------------
+  let escondida = oculto;
   let vivos = 6 - caidos;
   let curas = 0;
   const monstros = () =>
@@ -206,7 +212,7 @@ function montar({
     textContent: '🩹 Curar equipe',
     click() {
       curas += 1;
-      vivos = 6;
+      if (!curaFalha) vivos = 6;
     },
   };
   const fechaDlg = {
@@ -334,6 +340,11 @@ function montar({
     createElement: () => noDom(),
     head: noDom(),
     documentElement: noDom(),
+    // O vigia da equipe nao age com a aba escondida: ali o motor do jogo para, as placas dos
+    // NPC somem e a Joy fica fora de alcance.
+    get visibilityState() {
+      return escondida ? 'hidden' : 'visible';
+    },
     body: noDom(),
     // O `body` existe so' porque o olheiro precisa de algo para observar; o painel so' se monta
     // quando alguem o mostra, e aqui ninguem mostra.
@@ -380,6 +391,16 @@ function montar({
     ondeEsta: () => local,
     curas: () => curas,
     caidos: () => 6 - vivos,
+    // A equipe a cair no meio de uma caçada, e o HUD a bater por causa disso. E' assim que o
+    // vigia e' acordado: ele nao olha o relogio, olha a tela.
+    cair: (quantos = 1) => {
+      vivos = 6 - quantos;
+      mostrarNaTela('tick', false);
+    },
+    bater: () => mostrarNaTela('tick', false),
+    verAba: (sim) => {
+      escondida = !sim;
+    },
     anotado: (id) => anotados[id],
     controlar: (id) => controles[id],
   };
@@ -1001,4 +1022,161 @@ test('sem nada guardado, o painel aparece', () => {
   // no × ou no menu, e isso tambem fica guardado.
   const p = montar();
   assert.equal(p.anotado('times'), true);
+});
+
+// --------------------------------------------------------------- a Joy como porta do pacote
+
+test('curar sai da caçada, passa na Joy e devolve o jogador', async () => {
+  const p = comJoy({ caidos: 2 });
+
+  assert.equal(await p.api.curar(), '');
+
+  assert.equal(p.curas(), 1);
+  assert.equal(p.caidos(), 0);
+  assert.equal(p.ondeEsta(), 'Persian', 'voltou para a caçada');
+});
+
+test('ninguem caido: nao sai do lugar nem incomoda a Joy', async () => {
+  // Abrir conversa com um NPC a' toa e' barulho na tela de quem esta' a jogar.
+  const p = comJoy();
+
+  assert.equal(await p.api.curar(), '');
+
+  assert.equal(p.curas(), 0);
+  assert.deepEqual(p.viagens, []);
+});
+
+test('curar com voltar: false deixa o jogador em Cerulean', async () => {
+  // E' o que as Caçadas pedem: elas viajam logo a seguir, e uma volta no meio seria uma viagem
+  // inteira para nada.
+  const p = comJoy({ caidos: 1 });
+
+  assert.equal(await p.api.curar(() => {}, { voltar: false }), '');
+
+  assert.equal(p.curas(), 1);
+  assert.equal(p.ondeEsta(), 'Cerulean');
+});
+
+test('sem a Joy por perto, curar diz e devolve o jogador na mesma', async () => {
+  const p = comJoy({ caidos: 1, semJoy: true });
+
+  const r = await p.api.curar();
+
+  assert.match(r, /Nao achei a Nurse Joy/);
+  assert.equal(p.ondeEsta(), 'Persian', 'ninguem fica plantado em Cerulean');
+});
+
+test('curarAqui nao viaja, e nao pede a vez', async () => {
+  // E' a porta do Ciclo, que ja' tem a vez na mao desde o inicio da ida ao mercado: chamar a
+  // outra ficaria a' espera de si proprio, porque a fila so' e' reentrante para o mesmo dono.
+  const p = comJoy({ caidos: 1, onde: 'Cerulean', vezDe: 'ciclo' });
+
+  assert.equal(await p.api.curar(), 'Outra ferramenta esta agindo. Tente de novo.');
+  assert.equal(p.curas(), 0);
+
+  assert.equal(await p.api.curarAqui(), '');
+  assert.equal(p.curas(), 1, 'com a vez na mao de outro, esta ainda cura');
+});
+
+test('curarAqui fora de Cerulean recusa, em vez de viajar', async () => {
+  const p = comJoy({ caidos: 1, onde: 'Persian' });
+
+  // A frase exata importa: "nao achei a Joy" seria o que se diz **em** Cerulean, e as duas
+  // passariam por uma busca de "Cerulean" no texto.
+  assert.equal(await p.api.curarAqui(), 'A Nurse Joy fica em Cerulean, e voce nao esta la.');
+  assert.deepEqual(p.viagens, []);
+  assert.equal(p.curas(), 0);
+});
+
+/**
+ * Espera por uma condicao, em vez de por um numero de milissegundos.
+ *
+ * Dormir um tanto fixo faz o teste falhar na maquina ocupada e passar na vazia — e um teste que
+ * falha as vezes nao diz nada a ninguem. Espreita-se de 10 em 10 ms ate' 3 s.
+ */
+async function ate(cond, limite = 3000) {
+  const fim = Date.now() + limite;
+  while (Date.now() < fim) {
+    if (cond()) return true;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return false;
+}
+
+// --------------------------------------------------------------- o vigia da equipe
+
+test('a equipe cai no meio da caçada: vai a Joy sozinho e volta', async () => {
+  const p = comJoy();
+  p.cair(2);
+  // A volta inteira: sair da caçada, achar a Joy, curar e viajar de novo.
+  assert.ok(await ate(() => p.ondeEsta() === 'Persian' && p.curas() === 1), 'nao voltou a tempo');
+
+  assert.equal(p.curas(), 1);
+  assert.equal(p.caidos(), 0);
+  assert.equal(p.ondeEsta(), 'Persian', 'voltou para a caçada sozinho');
+});
+
+test('o vigia so age na mudanca, nao a cada batida do HUD', async () => {
+  // O HUD bate varias vezes por segundo numa caçada. Sem esta peneira, cada batida mandaria
+  // uma ida a Cerulean.
+  // Com a Joy fora de alcance a equipe **continua caida** depois da primeira ida — e e' por
+  // isso que este e' o caso que importa: sem a peneira, cada batida do HUD mandaria outra
+  // viagem a Cerulean, para sempre.
+  const p = comJoy({ semJoy: true });
+  p.cair(1);
+  assert.ok(await ate(() => p.ondeEsta() === 'Persian' && p.viagens.length > 0), 'nao foi e voltou');
+  const depoisDaPrimeira = p.viagens.length;
+  for (let i = 0; i < 5; i += 1) p.bater();
+  // Nao ha' condicao de sucesso para esperar — o que se mede e' que **nada** acontece. Entao
+  // da-se tempo de sobra para o erro aparecer, se ele existir.
+  await new Promise((r) => setTimeout(r, 400));
+
+  assert.equal(p.caidos(), 1, 'a equipe continua caida, senao o caso nao e este');
+  assert.equal(p.viagens.length, depoisDaPrimeira, 'uma ida a Cerulean, nao seis');
+});
+
+test('com a caixa desligada, o vigia nao se mexe', async () => {
+  const p = comJoy();
+  p.api.cfg.curarSozinho = false;
+  p.cair(2);
+  await new Promise((r) => setTimeout(r, 400));
+
+  assert.equal(p.curas(), 0);
+  assert.equal(p.caidos(), 2, 'a equipe caida fica caida, que foi o que se pediu');
+});
+
+test('com o Deposito aberto, o vigia espera', async () => {
+  // A janela esta' na frente do NPC, e quem a abriu foi o jogador. Mexer no que e' dele seria
+  // fechar-lhe a janela na cara.
+  const p = montar({ dep: { equipe: [], box: [] }, onde: 'Cerulean' });
+  p.cair(2);
+  await new Promise((r) => setTimeout(r, 400));
+
+  assert.equal(p.curas(), 0);
+});
+
+test('a Joy respondeu e a equipe continua caida: nao da por curada', async () => {
+  // Quem confere o clique da' isto por curado e manda viajar; o jogo recusa a viagem em
+  // silencio e a ferramenta fica a dizer que esta' tudo bem. Quem confere a barra de vida, nao.
+  const p = comJoy({ caidos: 2, curaFalha: true });
+
+  const r = await p.api.curar();
+
+  assert.match(r, /continua caida/);
+  assert.equal(p.caidos(), 2);
+});
+
+test('caiu com a aba escondida: tenta de novo quando ela volta', async () => {
+  // E' o caso real que a primeira versao perdia. Ela guardava "ja vi este caido", e a aba
+  // escondida fazia a tentativa ser descartada **depois** de guardar — dali em diante nunca
+  // mais tentava, e a equipe passava a noite caida numa janela em segundo plano.
+  const p = comJoy({ oculto: true });
+  p.cair(2);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(p.curas(), 0, 'com a aba escondida nao da para falar com a Joy');
+
+  p.verAba(true);
+  p.bater();
+  assert.ok(await ate(() => p.curas() === 1), 'nao curou depois de a aba voltar');
+  assert.equal(p.caidos(), 0);
 });

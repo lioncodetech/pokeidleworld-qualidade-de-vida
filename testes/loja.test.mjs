@@ -55,6 +55,10 @@ function montarLoja({
   // o popup medido em 09/10/2026: `.mk-sellconfirm`, "Cancelar" e "Vender mesmo assim".
   // `popupDiz` e' quantos ELE declara; null nenhum popup (o jogo faz isso com 1 selecionado).
   popupDiz = 'igual',
+  // A mochila do jogo: `{ 'Ultra Ball': 120 }`. Um item que nao esta' aqui nao aparece na
+  // mochila — e no jogo isso quer dizer zero, nao "nao sei". `'9999+'` e' o numero truncado.
+  mochila = null,
+  semInventario = false,
 } = {}) {
   const compras = [];
   const janela = no('mks-window');
@@ -96,6 +100,9 @@ function montarLoja({
       if (saldo >= (l.preco || 0)) {
         if (!l.naoDebita) saldo -= l.preco || 0;
         compras.push(l.nome);
+        // O que se compra entra na mochila: e' la' que a conferencia do fim vai olhar.
+        if (sacola && typeof sacola[l.nome] === 'number') sacola[l.nome] += 1;
+        else if (sacola && !(l.nome in sacola)) sacola[l.nome] = 1;
         atualizarOuro();
       }
     };
@@ -157,23 +164,101 @@ function montarLoja({
   });
   janela.filhos.push(btVender);
 
+  // --- a mochila -----------------------------------------------------------------------------
+  //
+  // Medido: `.inv-window` com `.inv-slot`, o nome no `alt` da imagem e a quantidade em
+  // `.inv-qty`. O item que nao existe nao tem slot nenhum, e `9999+` e' o truncado do jogo.
+  const sacola = mochila ? { ...mochila } : null;
+  let invAberto = false;
+  let aberturasDoInv = 0;
+
+  const btInv = no('', '');
+  btInv.title = 'Inventário';
+  btInv.ehBotao = true;
+  btInv.aoClicar = () => {
+    invAberto = true;
+    aberturasDoInv += 1;
+  };
+
+  const fecharInv = no('nsh-x', '×');
+  fecharInv.ehBotao = true;
+  fecharInv.aoClicar = () => {
+    invAberto = false;
+  };
+  const janelaInv = no('inv-window', '');
+  janelaInv.filhos.push(fecharInv);
+
+  const slots = () => {
+    if (!sacola) return [];
+    return Object.entries(sacola)
+      .filter(([, q]) => q !== 0)
+      .map(([nome, q]) => {
+        const s = no('inv-slot', '');
+        const qty = no('inv-qty', String(q));
+        s.filhos.push(qty);
+        s.querySelector = (sel) =>
+          sel === 'img' ? { alt: nome } : sel === '.inv-qty' ? qty : null;
+        return s;
+      });
+  };
+
   const doc = {
     querySelector: (sel) => {
       if (sel === '.mk-sellconfirm') return popup;
+      if (sel === '.inv-window') return invAberto ? janelaInv : null;
       return casa(janela, sel) ? janela : janela.querySelector(sel);
     },
-    body: { appendChild() {} },
+    querySelectorAll: (sel) => {
+      if (sel === '.inv-slot') return invAberto ? slots() : [];
+      if (sel === 'button') return semInventario ? [] : [btInv];
+      return [];
+    },
+    body: {
+      appendChild(x) {
+        oPainel = x;
+        return x;
+      },
+    },
     head: { appendChild() {} },
     documentElement: { appendChild() {} },
+    // O painel do modulo. Antes isto devolvia um no' cego — sem `classList`, sem filhos e sem
+    // ouvintes —, e por isso nada do painel era testavel: o minimizar da Loja chegou a nascer
+    // sem guarda nenhuma. Agora guarda o que o modulo lhe poe.
     createElement: () => {
       const e = no('');
       e.style = {};
-      e.append = () => {};
-      e.appendChild = () => {};
-      e.addEventListener = () => {};
+      const classes = new Set();
+      e.classList = {
+        add: (c) => classes.add(c),
+        remove: (c) => classes.delete(c),
+        contains: (c) => classes.has(c),
+        toggle: (c, sim) => (sim === false || (sim === undefined && classes.has(c))
+          ? classes.delete(c)
+          : classes.add(c)),
+      };
+      e.classes = classes;
+      e.ouvintes = {};
+      e.addEventListener = (tipo, fn) => {
+        (e.ouvintes[tipo] = e.ouvintes[tipo] || []).push(fn);
+      };
+      e.appendChild = (x) => {
+        e.filhos.push(x);
+        return x;
+      };
+      e.append = (...xs) => e.filhos.push(...xs);
+      // Procura em profundidade: a barra po-e os botoes dentro de um `div`.
+      e.querySelector = (sel) => {
+        for (const f of e.filhos) {
+          if (casa(f, sel)) return f;
+          const dentro = f.querySelector?.(sel);
+          if (dentro) return dentro;
+        }
+        return null;
+      };
       return e;
     },
   };
+  let oPainel = null;
 
   const PPX = {
     modulo: (meta, fn) => fn(),
@@ -183,6 +268,7 @@ function montarLoja({
   };
   globalThis.PPX = PPX;
 
+  const guardado = {};
   const mod = { exports: {} };
   const executar = new Function(
     'PPX',
@@ -196,7 +282,12 @@ function montarLoja({
   executar(
     PPX,
     doc,
-    { getItem: () => null, setItem: () => {} },
+    {
+      getItem: (k) => guardado[k] ?? null,
+      setItem: (k, v) => {
+        guardado[k] = v;
+      },
+    },
     (fn, ms) => globalThis.setTimeout(fn, Math.min(ms, 1)),
     () => {},
     mod,
@@ -204,9 +295,17 @@ function montarLoja({
 
   return {
     api: mod.exports,
+    painel: () => oPainel,
+    // O que ficou gravado: "lembra o modo" nao se mede no objeto em memoria.
+    guardado: () => JSON.parse(guardado['lioncode:pokeidleworld:loja:cfg'] || '{}'),
     compras,
     linhas: todasAsLinhas,
     saldo: () => saldo,
+    mochila: () => (sacola ? { ...sacola } : null),
+    // Quantas vezes o inventario foi aberto: a conta antiga abria duas vezes por item.
+    aberturasDoInv: () => aberturasDoInv,
+    // Se ficou aberto: a mochila por cima do jogo estorva quem joga e quem automatiza.
+    invAberto: () => invAberto,
     btVender,
     marcados: () => todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length,
     confirmados,
@@ -354,15 +453,6 @@ test('venda sem popup nao e tratada como erro', async () => {
   assert.match(r, /Vendidos/);
 });
 
-test('acima do teto nao chega nem a abrir o popup', async () => {
-  const p = montarLoja({ dinheiro: 1000, linhas: DOIS_COMUNS });
-  p.api.cfg.tetoVenda = 1;
-  const r = await p.api.venderAgora(() => {});
-  assert.match(r, /acima do teto/);
-  assert.equal(p.popupAberto(), false, 'nem abriu');
-  assert.deepEqual(p.confirmados, []);
-});
-
 test('popup que nao diz quantos e motivo para cancelar, nao para seguir', async () => {
   // Se um dia o jogo reescrever o aviso e tirar o numero, perde-se a terceira fonte de verdade.
   // Sem numero para conferir, o certo e' parar — nao confirmar no escuro.
@@ -371,4 +461,245 @@ test('popup que nao diz quantos e motivo para cancelar, nao para seguir', async 
   assert.deepEqual(p.confirmados, [], 'nao confirmou no escuro');
   assert.equal(p.cancelados.length, 1, 'cancelou');
   assert.match(r, /nao disse quantos/);
+});
+
+// --------------------------------------------------------------- abastecer pela mochila
+
+const LOJA_BOLAS = [
+  { nome: 'Ultra Ball', preco: 10 },
+  { nome: 'Great Potion', preco: 5 },
+];
+
+test('abastecer le a mochila, compra a diferenca e confere no fim', async () => {
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: LOJA_BOLAS,
+    mochila: { 'Ultra Ball': 8, 'Great Potion': 20 },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 10, 'Great Potion': 20 };
+  p.api.cfg.variacao = 0;
+
+  const r = await p.api.abastecer(() => {});
+
+  assert.equal(p.mochila()['Ultra Ball'], 10, 'comprou ate o alvo');
+  assert.equal(p.compras.filter((n) => n === 'Ultra Ball').length, 2);
+  assert.deepEqual(r.comprados, { 'Ultra Ball': 2, 'Great Potion': 0 });
+  assert.match(r.relato.join(' | '), /Ultra Ball: 8 → 10 \(\+2\), alvo 10/);
+  assert.match(r.relato.join(' | '), /Great Potion: 20\/20, nada a comprar/);
+});
+
+test('abre o inventario duas vezes, e nao duas por item', async () => {
+  // Antes o laco vivia no Ciclo e abria e fechava a mochila a cada item: dezoito aberturas
+  // para nove itens. Uma no inicio para saber o que ha', outra no fim para dizer o que entrou.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: LOJA_BOLAS,
+    mochila: { 'Ultra Ball': 0, 'Great Potion': 0 },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 3, 'Great Potion': 3 };
+  p.api.cfg.variacao = 0;
+
+  await p.api.abastecer(() => {});
+
+  assert.equal(p.aberturasDoInv(), 2);
+});
+
+test('item que nao esta na mochila tem zero, nao "nao sei"', async () => {
+  // Tratar "nao apareceu" como desconhecido faria justamente os itens acabados — os que mais
+  // precisam de compra — serem os unicos nunca comprados.
+  const p = montarLoja({ dinheiro: 100000, linhas: LOJA_BOLAS, mochila: { 'Great Potion': 5 } });
+  p.api.cfg.tetos = { 'Ultra Ball': 4 };
+  p.api.cfg.variacao = 0;
+
+  await p.api.abastecer(() => {});
+
+  assert.equal(p.compras.filter((n) => n === 'Ultra Ball').length, 4);
+});
+
+test('9999+ nao e numero: nao compra as cegas', async () => {
+  const p = montarLoja({ dinheiro: 100000, linhas: LOJA_BOLAS, mochila: { 'Ultra Ball': '9999+' } });
+  p.api.cfg.tetos = { 'Ultra Ball': 20000 };
+
+  const r = await p.api.abastecer(() => {});
+
+  assert.deepEqual(p.compras, []);
+  assert.match(r.relato.join(' '), /já passa de 9999/);
+});
+
+test('sem conseguir abrir a mochila, nao compra nada', async () => {
+  // Sem saber quanto se tem, "ate' ter X" nao e' uma conta que se possa fazer — e chutar
+  // compraria o alvo inteiro por cima do que ja' havia.
+  const p = montarLoja({ dinheiro: 100000, linhas: LOJA_BOLAS, semInventario: true });
+  p.api.cfg.tetos = { 'Ultra Ball': 50 };
+
+  const r = await p.api.abastecer(() => {});
+
+  assert.deepEqual(p.compras, []);
+  assert.match(r.relato.join(' '), /Nao achei o inventário/);
+});
+
+test('a variacao sorteia o alvo dentro da margem', () => {
+  // Sem ela a mochila termina sempre no mesmo numero redondo, compra apos compra — e um numero
+  // que se repete ao milesimo e' a coisa mais facil de reconhecer. Aqui mede-se a conta, e nao
+  // a compra: sortear mil alvos custa nada, comprar mil bolas custa a banca inteira.
+  const p = montarLoja({ dinheiro: 1, linhas: LOJA_BOLAS });
+  p.api.cfg.variacao = 10;
+  const vistos = new Set();
+  for (let i = 0; i < 300; i += 1) {
+    const alvo = p.api.alvoDeAgora(20000);
+    assert.ok(alvo >= 18000 && alvo <= 22000, `${alvo} fora da margem de 10%`);
+    vistos.add(alvo);
+  }
+  assert.ok(vistos.size > 50, `so ${vistos.size} alvos diferentes em 300 sorteios`);
+
+  p.api.cfg.variacao = 0;
+  assert.equal(p.api.alvoDeAgora(20000), 20000, 'zero compra exatamente ate o alvo');
+});
+
+test('variacao zero compra exatamente o alvo', async () => {
+  const p = montarLoja({ dinheiro: 100000, linhas: LOJA_BOLAS, mochila: { 'Ultra Ball': 0 } });
+  p.api.cfg.tetos = { 'Ultra Ball': 30 };
+  p.api.cfg.variacao = 0;
+
+  await p.api.abastecer(() => {});
+
+  assert.equal(p.mochila()['Ultra Ball'], 30);
+});
+
+// --- conferir a mochila ---------------------------------------------------------------------
+//
+// O botao que faltava. Sem ele, o numero ao lado de cada item so' aparecia depois de uma compra
+// — e quem quer **decidir** o alvo precisa de ver o estoque antes de gastar.
+
+test('conferir a mochila abre uma vez, le, fecha, e diz o que falta', async () => {
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: COMUM,
+    mochila: { 'Ultra Ball': 8, 'Small Potion': 40 },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 10, 'Small Potion': 40 };
+
+  const frase = await p.api.conferirEstoque();
+
+  assert.equal(frase, 'Mochila lida. Falta comprar: Ultra Ball 2.');
+  assert.equal(p.aberturasDoInv(), 1, 'abriu o inventário mais de uma vez');
+  assert.equal(p.invAberto(), false, 'deixou a mochila aberta por cima do jogo');
+  // Conferir nao compra: o botao e' para ver, e ver nao gasta.
+  assert.deepEqual(p.compras, []);
+  assert.deepEqual(p.mochila(), { 'Ultra Ball': 8, 'Small Potion': 40 });
+});
+
+test('item que nao esta na mochila conta como zero, nao como desconhecido', async () => {
+  // E' o caso que mais importa: o item acabado nao tem slot nenhum. Tratar "nao apareceu" como
+  // "nao sei" faria justamente o que falta ser o unico que nunca entra na conta.
+  const p = montarLoja({ dinheiro: 100000, linhas: COMUM, mochila: { 'Small Potion': 1 } });
+  p.api.cfg.tetos = { 'Ultra Ball': 10 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Falta comprar: Ultra Ball 10.');
+});
+
+test('o 9999+ do jogo nao entra na conta do que falta', async () => {
+  const p = montarLoja({ dinheiro: 100000, linhas: COMUM, mochila: { 'Ultra Ball': '9999+' } });
+  p.api.cfg.tetos = { 'Ultra Ball': 20000 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Todos os alvos estao cheios.');
+});
+
+test('sem alvo nenhum, conferir ainda le a mochila e diz-se', async () => {
+  const p = montarLoja({ dinheiro: 100000, linhas: COMUM, mochila: { 'Ultra Ball': 3 } });
+  p.api.cfg.tetos = {};
+
+  assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Nenhum alvo de estoque definido.');
+  assert.equal(p.aberturasDoInv(), 1);
+});
+
+test('sem botao de inventario, diz que nao achou em vez de calar', async () => {
+  const p = montarLoja({ linhas: COMUM, mochila: { 'Ultra Ball': 3 }, semInventario: true });
+  p.api.cfg.tetos = { 'Ultra Ball': 10 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Nao achei o inventário.');
+});
+
+test('o estoque lido aparece ao lado de cada item, e o truncado fica truncado', async () => {
+  // O painel mostra o que foi MEDIDO. `9999` ali seria inventar o que o jogo nao disse.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: COMUM,
+    mochila: { 'Ultra Ball': '9999+', 'Small Potion': 40 },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 10 };
+  assert.equal(p.api.rotulos['Ultra Ball'].textContent, 'Ultra Ball', 'nasceu com numero');
+
+  await p.api.conferirEstoque();
+
+  assert.equal(p.api.rotulos['Ultra Ball'].textContent, 'Ultra Ball · tem 9999+');
+  assert.equal(p.api.rotulos['Small Potion'].textContent, 'Small Potion · tem 40');
+  // Item fora da mochila e' zero, e o painel diz zero — nao fica em branco.
+  assert.equal(p.api.rotulos['Hyper Potion'].textContent, 'Hyper Potion · tem 0');
+});
+
+// --- minimizar ------------------------------------------------------------------------------
+//
+// Este era o unico dos cinco paineis sem minimizar, e e' o mais alto de todos: nove campos de
+// alvo, a margem, a venda e a agenda. Minimizado fica o que se usa todo dia.
+
+test('o painel minimiza, lembra o modo, e o botao diz em que modo esta', () => {
+  const p = montarLoja({ linhas: COMUM });
+  const painel = p.painel();
+  assert.ok(painel, 'o painel nao foi montado');
+
+  const bt = painel.querySelector('.ljx-min');
+  assert.ok(bt, 'nao ha botao de minimizar');
+  assert.equal(bt.textContent, '–');
+  assert.equal(painel.classes.has('compacto'), false);
+
+  bt.ouvintes.click[0]();
+
+  assert.equal(painel.classes.has('compacto'), true);
+  assert.equal(bt.textContent, '□', 'o botao nao diz que ja esta minimizado');
+  assert.equal(p.api.cfg.compacto, true);
+  assert.equal(p.guardado().compacto, true, 'o modo nao foi gravado: morre no F5');
+
+  bt.ouvintes.click[0]();
+
+  assert.equal(painel.classes.has('compacto'), false);
+  assert.equal(bt.textContent, '–');
+});
+
+test('minimizar nao e esconder: sao dois botoes diferentes', () => {
+  // Um `×` que encolhesse, ou um `–` que escondesse, seria o pior dos dois mundos.
+  const p = montarLoja({ linhas: COMUM });
+  const painel = p.painel();
+  const bts = painel.querySelector('.ljx-barra').filhos.at(-1).filhos;
+
+  assert.equal(bts.length, 2);
+  assert.equal(bts[1].textContent, '×');
+  assert.ok(/Esconder/.test(bts[1].title));
+  assert.ok(!painel.classes.has('compacto'));
+});
+
+test('o que o minimizado esconde esta marcado, e o que ele guarda nao', () => {
+  // A regra do CSS esconde `.ljx-l`, `.ljx-sep` e `.ljx-detalhe`. Entao o botao da mochila e o
+  // do ciclo — o uso de todo dia — nao podem levar nenhuma dessas marcas.
+  const p = montarLoja({ linhas: COMUM });
+  const painel = p.painel();
+  const rotulo = (f) => String(f.textContent || '');
+  const marcado = (f) => /ljx-(l|sep|detalhe)\b/.test(String(f.className));
+
+  const mochila = painel.filhos.find((f) => /Conferir a mochila/.test(rotulo(f)));
+  const ciclo = painel.filhos.find((f) => /Rodar o ciclo/.test(rotulo(f)));
+  assert.ok(mochila && ciclo, 'os botoes do dia a dia nao estao no painel');
+  assert.ok(!marcado(mochila), 'a mochila desaparece ao minimizar');
+  assert.ok(!marcado(ciclo), 'o ciclo desaparece ao minimizar');
+
+  const venda = painel.filhos.find((f) => /Preparar venda/.test(rotulo(f)));
+  assert.ok(marcado(venda), 'a venda fica no modo minimizado');
+
+  // E o mecanismo: sao as marcas mais a regra do CSS. Sem ela, as marcas nao querem dizer nada.
+  const css = fonte.slice(fonte.indexOf('const CSS ='), fonte.indexOf("].join('')"));
+  for (const classe of ['.ljx-l', '.ljx-sep', '.ljx-detalhe'])
+    assert.ok(
+      css.includes(`.ljx.compacto ${classe}`),
+      `a regra do minimizado nao esconde ${classe}`,
+    );
 });

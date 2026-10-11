@@ -250,6 +250,15 @@ PPX.modulo(
         cerulean.click();
         await esperar(3000);
 
+        // 1b. a Joy, que fica no caminho. Toda volta a' cidade passa por ela se alguem caiu —
+        // uma equipe caida nao sai de Cerulean, e o jogo recusa a viagem sem dizer porque.
+        // `curarAqui` nao pede a vez: ela ja' esta' nesta mao, desde o inicio do ciclo.
+        const times = globalThis.PPX?.times;
+        if (times?.alguemCaido?.()) {
+          const falta = await times.curarAqui?.(nota);
+          if (falta) nota(falta);
+        }
+
         // 2. mercado
         const mercado = porTexto(/Ir ao Mercado/);
         if (!mercado) {
@@ -283,29 +292,14 @@ PPX.modulo(
         }
 
         // 5. compras ate o teto
-        if (comprar) {
-          for (const [nome, teto] of Object.entries(tetos())) {
-            if (!teto) continue;
-            await fecharInventario();
-            const tem = await estoque(nome);
-            await fecharInventario();
-            if (tem === Infinity) {
-              nota(`${nome}: ja' passa de 9999, nao comprei.`);
-              continue;
-            }
-            if (tem === null) {
-              nota(`${nome}: nao consegui ler o estoque, nao comprei.`);
-              continue;
-            }
-            const falta = teto - tem;
-            if (falta <= 0) {
-              nota(`${nome}: ${tem}/${teto}, nada a comprar.`);
-              continue;
-            }
-            const r = await comprar(nome, falta);
-            nota(`${nome}: ${tem} -> ${tem + (r?.comprou || 0)} (alvo ${teto})`);
-          }
-        }
+        // Quem sabe comprar e' a Loja: ela abre o inventario uma vez, compra a diferenca de
+        // cada item e confere no fim abrindo outra vez. Antes este laco vivia aqui e abria o
+        // inventario duas vezes **por item** — dezoito aberturas para nove itens.
+        const loja = globalThis.PPX?.loja;
+        if (loja?.abastecer) {
+          const r = await loja.abastecer(nota);
+          for (const linha of r.relato) nota(linha);
+        } else nota('A Loja do Mark nao esta ligada: nao comprei nada.');
       } finally {
         await fecharInventario();
         await fecharJanela();

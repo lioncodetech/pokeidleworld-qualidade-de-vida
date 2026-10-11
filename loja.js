@@ -11,7 +11,7 @@
 //    auditar o que esta' marcado em vez de confiar que o filtro funcionou — ver `auditar()`.
 //
 PPX.modulo(
-  { id: 'loja', nome: 'Loja do Mark', atalhos: 'Alt+L abre o painel', proprio: true },
+  { id: 'loja', nome: 'Loja do Mark', atalhos: 'Alt+L esconde · Alt+M mostra', proprio: true },
   () => {
     const CHAVE_CFG = 'lioncode:pokeidleworld:loja:cfg';
     const MINHA_VEZ = 'loja';
@@ -23,8 +23,8 @@ PPX.modulo(
     // compra sem respiro e' pedir para o servidor achar que e' ataque.
     const PAUSA_COMPRA = 140;
 
-    // Acima disto a venda para e pede confirmacao, por mais que os filtros estejam certos.
-    const TETO_VENDA_PADRAO = 100;
+    /** A margem com que o alvo e' sorteado, em porcento. Zero compra exatamente ate' o alvo. */
+    const VARIACAO_PADRAO = 3;
 
     const ITENS = [
       'Poké Ball',
@@ -40,7 +40,7 @@ PPX.modulo(
 
     // `tetos` e' estoque-alvo, nao quantidade a comprar: o ciclo compra a diferenca entre o que
     // ha' no inventario e este numero. E' o mesmo contrato do pacote do PokePixel.
-    const PADRAO = { tetos: {}, tetoVenda: TETO_VENDA_PADRAO, pos: null };
+    const PADRAO = { tetos: {}, variacao: VARIACAO_PADRAO, pos: null, compacto: false };
 
     let cfg = { ...PADRAO };
     try {
@@ -66,6 +66,8 @@ PPX.modulo(
 
     // --- leitura da loja -------------------------------------------------------------------
 
+    const botoes = () => [...document.querySelectorAll('button')];
+    const porTitulo = (t) => botoes().find((b) => (b.title || '').trim() === t);
     const janela = () => document.querySelector('.mks-window');
 
     /** O saldo em dollars, lido do cabecalho da loja. `null` quando a loja nao esta aberta. */
@@ -91,6 +93,185 @@ PPX.modulo(
       [...(janela()?.querySelectorAll('.mks-row') || [])].find(
         (r) => (r.querySelector('.mks-name')?.textContent || '').trim() === nome,
       );
+
+    // --- o inventario ------------------------------------------------------------------------
+    //
+    // Quem compra "ate' ter X" precisa de saber quanto ja' tem, e isso o painel da loja nao diz:
+    // esta' na mochila. Antes esta leitura morava no Ciclo e abria e fechava o inventario **uma
+    // vez por item** — nove aberturas para nove itens. Agora abre-se uma vez, le-se tudo, e
+    // abre-se outra vez no fim para dizer quanto entrou de facto.
+
+    const janelaInv = () => document.querySelector('.inv-window');
+
+    async function abrirInventario() {
+      if (janelaInv()) return true;
+      const bt = porTitulo('Inventário');
+      if (!bt) return false;
+      bt.click();
+      // Espera a janela existir, nao um relogio: a mochila e' uma lista grande.
+      for (let i = 0; i < 12 && !janelaInv(); i += 1) await esperar(250);
+      return !!janelaInv();
+    }
+
+    async function fecharInventario() {
+      const w = janelaInv();
+      if (!w) return;
+      const x =
+        w.querySelector('.nsh-x') ||
+        [...w.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '×');
+      if (x) {
+        x.click();
+        await esperar(700);
+      }
+    }
+
+    /**
+     * Quanto ha' de cada item da lista, lido de uma vez so'.
+     *
+     * Um item que **nao aparece** na mochila tem zero — a mochila so' lista o que existe, e
+     * tratar "nao apareceu" como "nao sei" faria justamente os itens acabados, os que mais
+     * precisam de compra, serem os unicos nunca comprados. Ja' `Infinity` e' o `9999+` do jogo:
+     * numero truncado nao e' numero, e quem nao sabe quanto tem nao pode comprar "a diferenca".
+     */
+    function lerInventario() {
+      if (!janelaInv()) return null;
+      const slots = [...document.querySelectorAll('.inv-slot')];
+      const conta = {};
+      for (const nome of ITENS) {
+        const slot = slots.find((s) => (s.querySelector('img')?.alt || '').trim() === nome);
+        if (!slot) {
+          conta[nome] = 0;
+          continue;
+        }
+        const txt = (slot.querySelector('.inv-qty')?.textContent || '1').trim();
+        if (/\+/.test(txt)) {
+          conta[nome] = Infinity;
+          continue;
+        }
+        const v = parseInt(txt.replace(/\D/g, ''), 10);
+        conta[nome] = Number.isFinite(v) ? v : null;
+      }
+      return conta;
+    }
+
+    /**
+     * O que foi lido da mochila na ultima vez, por item. Mora aqui e nao no painel porque quem
+     * le' e' a compra, que corre com o painel fechado — e quando ele abrir, ja' tem o que mostrar.
+     */
+    let ultimoEstoque = null;
+
+    /**
+     * Abre o inventario, le, fecha, e devolve a frase.
+     *
+     * Isto e' o botao "conferir a mochila": sem ele, o numero ao lado de cada item so' aparecia
+     * depois de uma compra — e quem quer **decidir** o alvo precisa de ver o estoque antes de
+     * gastar. Abrir a mochila e' agir no jogo, entao pede a vez como qualquer outra rotina.
+     */
+    async function conferirEstoque(aviso = () => {}) {
+      let soltar = null;
+      try {
+        soltar = await esperarAVez();
+        if (!soltar) return 'Nao consegui a vez na fila; nao abri a mochila.';
+        aviso('Abrindo o inventário…');
+        if (!(await abrirInventario())) return 'Nao achei o inventário.';
+        const conta = lerInventario();
+        await fecharInventario();
+        if (!conta) return 'Nao consegui ler o inventário.';
+        pintarEstoque(conta);
+
+        const alvos = Object.entries(cfg.tetos).filter(([, teto]) => teto > 0);
+        if (!alvos.length) return 'Mochila lida. Nenhum alvo de estoque definido.';
+        const faltam = alvos
+          .filter(([nome, teto]) => Number.isFinite(conta[nome]) && conta[nome] < teto)
+          .map(([nome, teto]) => `${nome} ${teto - conta[nome]}`);
+        return faltam.length
+          ? `Mochila lida. Falta comprar: ${faltam.join(', ')}.`
+          : 'Mochila lida. Todos os alvos estao cheios.';
+      } finally {
+        if (soltar) soltar();
+      }
+    }
+
+    /** A margem guardada, presa entre 0 e 50 — 50% ja' e' meio estoque de diferenca. */
+    const variacaoPct = () => {
+      const n = Number(cfg.variacao);
+      return Number.isFinite(n) ? Math.min(50, Math.max(0, Math.round(n))) : VARIACAO_PADRAO;
+    };
+
+    /**
+     * O alvo desta vez, sorteado dentro da margem.
+     *
+     * Sem isto a mochila termina sempre no mesmo numero redondo, compra apos compra — e um
+     * numero que se repete ao milesimo e' a coisa mais facil de reconhecer numa gravacao. Com
+     * 3%, um alvo de 20.000 vira algo entre 19.400 e 20.600.
+     */
+    const alvoDeAgora = (teto) => {
+      const pct = variacaoPct();
+      if (!pct) return teto;
+      const margem = (Math.random() * 2 - 1) * (pct / 100);
+      return Math.max(0, Math.round(teto * (1 + margem)));
+    };
+
+    /**
+     * Enche a mochila ate' os alvos: le o inventario, compra a diferenca de cada item e confere
+     * no fim, abrindo o inventario outra vez.
+     *
+     * A conferencia do fim nao e' enfeite: a compra conta cliques que debitaram, e o que
+     * interessa e' quanto **entrou na mochila**. Os dois numeros discordarem e' justamente o
+     * que se quer ver.
+     */
+    async function abastecer(aviso = () => {}) {
+      const alvos = Object.entries(cfg.tetos).filter(([, teto]) => teto > 0);
+      if (!alvos.length) return { relato: ['Nenhum alvo de estoque definido.'], comprados: {} };
+
+      aviso('Abrindo o inventário para ver o que já tenho…');
+      if (!(await abrirInventario()))
+        return { relato: ['Nao achei o inventário. Nao comprei nada.'], comprados: {} };
+      const antes = lerInventario();
+      await fecharInventario();
+      if (!antes) return { relato: ['Nao consegui ler o inventário. Nao comprei nada.'], comprados: {} };
+      pintarEstoque(antes);
+
+      const relato = [];
+      for (const [nome, teto] of alvos) {
+        const tem = antes[nome];
+        if (tem === Infinity) {
+          relato.push(`${nome}: já passa de 9999, não comprei.`);
+          continue;
+        }
+        if (tem === null) {
+          relato.push(`${nome}: não consegui ler o estoque, não comprei.`);
+          continue;
+        }
+        const alvo = alvoDeAgora(teto);
+        const falta = alvo - tem;
+        if (falta <= 0) {
+          relato.push(`${nome}: ${tem}/${teto}, nada a comprar.`);
+          continue;
+        }
+        aviso(`${nome}: comprando ${falta}…`);
+        const r = await comprar(nome, falta, aviso);
+        if (r.motivo) relato.push(`${nome}: parei em ${r.comprou}/${falta} — ${r.motivo}.`);
+      }
+
+      aviso('Conferindo o inventário…');
+      const comprados = {};
+      if (!(await abrirInventario())) {
+        relato.push('Nao consegui reabrir o inventário para conferir.');
+        return { relato, comprados };
+      }
+      const depois = lerInventario();
+      await fecharInventario();
+      if (depois) pintarEstoque(depois);
+      for (const [nome, teto] of alvos) {
+        const a = antes[nome];
+        const d = depois?.[nome];
+        if (!Number.isFinite(a) || !Number.isFinite(d)) continue;
+        comprados[nome] = d - a;
+        relato.push(`${nome}: ${a} → ${d} (+${d - a}), alvo ${teto}.`);
+      }
+      return { relato, comprados };
+    }
 
     // --- compra ----------------------------------------------------------------------------
 
@@ -241,6 +422,8 @@ PPX.modulo(
     // --- o painel ---------------------------------------------------------------------------
 
     let painel = null;
+    /** Devolvido pelo nucleo: recoloca o painel no canto guardado. */
+    let recolocar = () => false;
     let ocupado = false;
 
     const diz = (txt) => {
@@ -248,76 +431,32 @@ PPX.modulo(
       if (alvo) alvo.textContent = txt;
     };
 
-    const CSS = [
+    // A moldura, a barra, os botoes, o separador, o status, a rolagem e o foco vem do
+    // nucleo: cinco copias da mesma folha derivam, e derivaram. Aqui fica o que e' deste
+    // painel — e vem depois, por isso ganha nos empates.
+    const CSS = (globalThis.PPX?.estiloDePainel?.('ljx') || '') + [
       // Cada painel nasce num canto proprio: de baixo a' direita e' o painel de captura do
       // jogo, e empilhar os quatro no mesmo lugar escondia um atras do outro. Quem arrasta
       // manda — `cfg.pos` passa por cima disto.
-      '.ljx{position:fixed;left:360px;bottom:96px;z-index:2147483646;width:272px;max-height:70vh;',
-      'overflow:auto;background:#11151df2;color:#e6e9ef;font:13px system-ui,sans-serif;',
-      'border:1px solid #3a4152;border-radius:10px;padding:12px 13px;box-shadow:0 8px 26px #0009}',
-      '.ljx-barra{display:flex;align-items:center;justify-content:space-between;cursor:move;',
-      'user-select:none;margin:-4px -4px 6px}',
-      '.ljx h4{margin:0;font-size:13px;letter-spacing:.3px}',
-      '.ljx-x{width:auto!important;margin:0!important;padding:1px 7px!important;line-height:1;',
-      'font-size:15px!important;background:transparent!important;border:none!important;',
-      'opacity:.6;cursor:pointer}',
-      '.ljx-x:hover{opacity:1;background:#273145!important}',
+      '.ljx{left:360px;bottom:96px;width:272px}',
       '.ljx-l{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0}',
       '.ljx-l span{flex:1;font-size:12px;opacity:.9}',
       '.ljx input{width:62px;background:#0b0e14;color:#e6e9ef;border:1px solid #3a4152;',
       'border-radius:5px;padding:3px 5px;font:12px system-ui,sans-serif;text-align:right}',
-      '.ljx button{width:100%;margin-top:8px;background:#1d2534;color:#e6e9ef;',
-      'border:1px solid #3a4152;border-radius:6px;padding:7px;font:13px system-ui,sans-serif;',
-      'cursor:pointer}',
-      '.ljx button:hover{background:#273145}',
-      '.ljx-sep{margin:11px 0 5px;border-top:1px solid #2a3140;padding-top:8px;font-size:11px;',
-      'opacity:.65;text-transform:uppercase;letter-spacing:.6px}',
-      '.ljx-status{margin-top:9px;font-size:11.5px;opacity:.8;min-height:15px;line-height:1.35}',
+      // Minimizado fica o que se usa todo dia: conferir a mochila e rodar o ciclo. Os alvos, a
+      // margem e a agenda sao de configurar, e configurar nao se faz todo dia — este painel e' o
+      // mais alto dos cinco, e era justamente o unico sem minimizar.
+      '.ljx.compacto .ljx-l,.ljx.compacto .ljx-sep,.ljx.compacto .ljx-detalhe{display:none}',
     ].join('');
 
-    /**
-     * Arrastar pela barra, e a posicao sobrevive ao F5.
-     *
-     * Guarda-se esquerda/topo e nao direita/baixo porque o painel passa a ser posicionado pelo
-     * canto que o utilizador escolheu; e na hora de aplicar confere-se que ainda cabe na tela,
-     * senao um painel largado na borda de um monitor grande some no monitor pequeno.
-     */
-    function arrastarPor(alca) {
-      let solto = null;
-      alca.addEventListener('mousedown', (ev) => {
-        if (ev.button !== 0) return;
-        ev.preventDefault();
-        const r = painel.getBoundingClientRect();
-        const dx = ev.clientX - r.left;
-        const dy = ev.clientY - r.top;
-        const mover = (e) => {
-          const x = Math.min(Math.max(0, e.clientX - dx), innerWidth - 60);
-          const y = Math.min(Math.max(0, e.clientY - dy), innerHeight - 40);
-          painel.style.left = `${x}px`;
-          painel.style.top = `${y}px`;
-          painel.style.right = 'auto';
-          painel.style.bottom = 'auto';
-        };
-        solto = () => {
-          removeEventListener('mousemove', mover);
-          removeEventListener('mouseup', solto);
-          cfg.pos = { x: parseInt(painel.style.left, 10), y: parseInt(painel.style.top, 10) };
-          gravar();
-        };
-        addEventListener('mousemove', mover);
-        addEventListener('mouseup', solto);
-      });
-    }
-
-    /** Devolve o painel para onde foi largado, se aquele lugar ainda existe nesta tela. */
-    function aplicarPosicao() {
-      const p = cfg.pos;
-      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
-      if (p.x > innerWidth - 60 || p.y > innerHeight - 40) return;
-      painel.style.left = `${p.x}px`;
-      painel.style.top = `${p.y}px`;
-      painel.style.right = 'auto';
-      painel.style.bottom = 'auto';
+    /** O modo guardado, porque quem prefere um modo prefere sempre. */
+    function aplicarModo() {
+      if (!painel) return;
+      painel.classList.toggle('compacto', cfg.compacto === true);
+      const bt = painel.querySelector('.ljx-min');
+      if (!bt) return;
+      bt.textContent = cfg.compacto ? '□' : '–';
+      bt.title = cfg.compacto ? 'Mostrar tudo' : 'Minimizar';
     }
 
     const campoNumero = (valor) => {
@@ -334,8 +473,33 @@ PPX.modulo(
       const r = document.createElement('span');
       r.textContent = rotulo;
       l.append(r, campo);
+      // O rotulo fica a' mao porque ele muda: e' nele que se escreve quanto ha' na mochila.
+      // Guardar a referencia e' mais seguro do que procura-la depois por classe.
+      l.ppxRotulo = r;
       return l;
     };
+
+    /** Os rotulos das linhas de item, por nome, para poder reescrever cada um. */
+    const rotulos = {};
+
+    /**
+     * Escreve ao lado de cada item quanto ha' dele na mochila.
+     *
+     * Chamado tanto pelo botao de conferir como pelas duas leituras da compra — o painel mostra
+     * o que foi **medido**, nunca uma conta nossa. `9999+` continua `9999+`: numero truncado nao
+     * e' numero, e mostrar `9999` ali seria inventar o que o jogo nao disse.
+     */
+    function pintarEstoque(conta) {
+      if (conta) ultimoEstoque = conta;
+      for (const nome of ITENS) {
+        const r = rotulos[nome];
+        if (!r) continue;
+        const v = ultimoEstoque?.[nome];
+        if (v === undefined) r.textContent = nome;
+        else if (v === null) r.textContent = `${nome} · ?`;
+        else r.textContent = `${nome} · tem ${v === Infinity ? '9999+' : v}`;
+      }
+    }
 
     function montar() {
       if (painel) return painel;
@@ -353,14 +517,26 @@ PPX.modulo(
       barra.className = 'ljx-barra';
       const titulo = document.createElement('h4');
       titulo.textContent = 'Loja do Mark';
+      // Dois botoes, e eles nao sao a mesma coisa: o `–` encolhe e a janela continua a' vista;
+      // o `×` esconde. Quem minimiza quer continuar a ver os botoes do dia a dia.
+      const encolher = document.createElement('button');
+      encolher.className = 'ljx-x ljx-min';
+      encolher.addEventListener('click', () => {
+        cfg.compacto = !cfg.compacto;
+        gravar();
+        aplicarModo();
+      });
+
       const fechar = document.createElement('button');
       fechar.className = 'ljx-x';
       fechar.textContent = '×';
       fechar.title = 'Esconder (Alt+L traz de volta)';
       fechar.addEventListener('click', () => mostrar(false));
-      barra.append(titulo, fechar);
+
+      const cantos = document.createElement('div');
+      cantos.append(encolher, fechar);
+      barra.append(titulo, cantos);
       painel.appendChild(barra);
-      arrastarPor(barra);
 
       const legenda = document.createElement('div');
       legenda.className = 'ljx-sep';
@@ -376,27 +552,56 @@ PPX.modulo(
           campo.value = String(cfg.tetos[nome]);
           gravar();
         });
-        painel.appendChild(linhaDoPainel(nome, campo));
+        const l = linhaDoPainel(nome, campo);
+        rotulos[nome] = l.ppxRotulo;
+        painel.appendChild(l);
       }
+      // Se a compra ja' correu com o painel fechado, os numeros dela aparecem na abertura.
+      pintarEstoque(null);
+
+      const btMochila = document.createElement('button');
+      btMochila.className = 'ljx-mochila';
+      btMochila.textContent = '🎒 Conferir a mochila';
+      btMochila.title = 'Abre o inventário, lê quanto há de cada item e mostra aqui do lado';
+      btMochila.addEventListener('click', async () => {
+        if (ocupado) {
+          diz('Espere: já tem coisa rodando.');
+          return;
+        }
+        ocupado = true;
+        try {
+          diz(await conferirEstoque(diz));
+        } finally {
+          ocupado = false;
+        }
+      });
+      painel.appendChild(btMochila);
 
       const sep = document.createElement('div');
       sep.className = 'ljx-sep';
       sep.textContent = `Venda · protege ${PROTEGIDAS.join(', ')}`;
       painel.appendChild(sep);
 
-      const cTeto = campoNumero(cfg.tetoVenda);
-      cTeto.min = '1';
-      cTeto.addEventListener('change', () => {
-        cfg.tetoVenda = Math.max(1, parseInt(cTeto.value, 10) || TETO_VENDA_PADRAO);
-        cTeto.value = String(cfg.tetoVenda);
+      const cVariacao = campoNumero(variacaoPct());
+      cVariacao.min = '0';
+      cVariacao.max = '50';
+      cVariacao.title =
+        'Margem com que o alvo é sorteado a cada compra: com 3%, um alvo de 20.000 vira algo ' +
+        'entre 19.400 e 20.600. Zero compra exatamente até o alvo.';
+      cVariacao.addEventListener('change', () => {
+        cfg.variacao = Math.min(50, Math.max(0, parseInt(cVariacao.value, 10) || 0));
+        cVariacao.value = String(cfg.variacao);
         gravar();
+        diz(
+          cfg.variacao
+            ? `Alvo sorteado em ±${cfg.variacao}% a cada compra.`
+            : 'Alvo exato, sem sorteio.',
+        );
       });
-      // "quantos de uma vez", nao IV: e' um limite de QUANTIDADE, a ultima trava antes do clique
-      // que nao volta. Se a selecao vier maior do que isto, algo mudou e nao se vende.
-      cTeto.title = 'Quantos pokémon no máximo por rodada. Não é IV: é quantidade.';
-      painel.appendChild(linhaDoPainel('Máx. por vez (qtd)', cTeto));
+      painel.appendChild(linhaDoPainel('Variar o alvo em ± (%)', cVariacao));
 
       const btVender = document.createElement('button');
+      btVender.className = 'ljx-detalhe';
       btVender.textContent = 'Preparar venda (sem vender)';
       btVender.addEventListener('click', () => rodarVenda());
       painel.appendChild(btVender);
@@ -420,7 +625,10 @@ PPX.modulo(
       painel.appendChild(sepAg);
 
       const editor = globalThis.PPX?.ciclo?.controlesDaAgenda?.((txt) => diz(`Agenda: ${txt}`));
-      if (editor) painel.appendChild(editor.el);
+      if (editor) {
+        editor.el.className = `${editor.el.className || ''} ljx-detalhe`.trim();
+        painel.appendChild(editor.el);
+      }
       else {
         const semAgenda = document.createElement('div');
         semAgenda.className = 'ljx-status';
@@ -432,8 +640,26 @@ PPX.modulo(
       status.className = 'ljx-status';
       painel.appendChild(status);
 
+      // Em cima das outras ao ser tocado, e nunca pendurado para fora quando a janela encolhe.
+      // Quem faz as duas coisas e' o nucleo: eram cinco copias, e o recorte do `resize` nao
+      // existia em nenhuma delas.
       document.body.appendChild(painel);
-      aplicarPosicao();
+
+      // Arrastar, lembrar o lugar, vir para a frente ao ser tocado e nao ficar pendurado para
+      // fora quando a janela encolhe: tudo isto e' do nucleo. Eram cinco copias, cada uma com
+      // `mousedown` na janela (que perde o arrasto se o ponteiro sair) e pixels do canto de cima
+      // a' esquerda (que nao sobrevivem a encolher a janela). O `recolocar` serve para quando o
+      // painel volta a' vista: escondido ele nao tem caixa para medir.
+      recolocar =
+        globalThis.PPX?.painel?.(painel, {
+          alca: barra,
+          pos: cfg.pos,
+          guardar: (p) => {
+            cfg.pos = p;
+            gravar();
+          },
+        }) || (() => false);
+      aplicarModo();
       return painel;
     }
 
@@ -456,8 +682,6 @@ PPX.modulo(
       if (!janela()) return 'Loja fechada: nao vendi.';
       const r = await prepararVenda(aviso);
       if (!r.ok) return `Venda parada: ${r.motivo}. Nada foi vendido.`;
-      if (r.total > cfg.tetoVenda)
-        return `${r.total} selecionados, acima do teto de ${cfg.tetoVenda}. Nao vendi.`;
 
       const bt = [...janela().querySelectorAll('button')].find((x) =>
         /^Vender\s*\(/.test((x.textContent || '').trim()),
@@ -540,10 +764,6 @@ PPX.modulo(
           diz(`Parado: ${r.motivo}. Nada foi vendido.`);
           return;
         }
-        if (r.total > cfg.tetoVenda) {
-          diz(`${r.total} selecionados, acima do teto de ${cfg.tetoVenda}. Confira antes.`);
-          return;
-        }
         diz(`${r.total} prontos, nenhum protegido marcado. Clique em Vender no jogo.`);
       } finally {
         if (soltar) soltar();
@@ -568,8 +788,15 @@ PPX.modulo(
         cfg.visivel = visivel;
         gravar();
       }
-      if (visivel) montar().style.display = 'block';
-      else if (painel) painel.style.display = 'none';
+      if (visivel) {
+        montar().style.display = 'block';
+        // Aparecer e' aparecer na frente: abrir pelo atalho com outro painel por cima nao seria
+        // abrir nada.
+        globalThis.PPX?.frente?.(painel);
+        // Escondido nao tem caixa para medir: se a janela mudou de tamanho enquanto ele estava
+        // fora, e' agora que o canto guardado volta a valer.
+        recolocar();
+      } else if (painel) painel.style.display = 'none';
       globalThis.PPX?.anotar?.('loja', visivel);
     }
 
@@ -577,14 +804,17 @@ PPX.modulo(
       'keydown',
       (e) => {
         if (!e.altKey || e.ctrlKey || e.shiftKey) return;
-        if (e.key.toLowerCase() !== 'l') return;
-        // Campo de texto nao dispara atalho: o jogo tem chat, e um "l" ali nao e' um comando.
+        const tecla = e.key.toLowerCase();
+        if (tecla !== 'l' && tecla !== 'm') return;
+        // Campo de texto nao dispara atalho: o jogo tem chat, e uma letra ali nao e' um comando.
         const alvo = e.target;
         if (alvo && (alvo.isContentEditable || /^(input|textarea|select)$/i.test(alvo.tagName)))
           return;
         e.preventDefault();
         e.stopPropagation();
-        mostrar(!visivel);
+        // Duas teclas, e nao uma que alterna: com uma so' e' preciso olhar para o ecra' antes de
+        // a usar, porque ela faz o contrario do que fez da ultima vez.
+        mostrar(tecla === 'm');
       },
       true,
     );
@@ -597,10 +827,31 @@ PPX.modulo(
     // A loja e' a camada de acoes; o ciclo so' as encadeia. A configuracao mora aqui, num lugar
     // so': dois donos para o mesmo teto seria o jeito mais facil de comprar pelo numero errado.
     globalThis.PPX = globalThis.PPX || {};
-    globalThis.PPX.loja = { comprar, prepararVenda, auditar, venderAgora, cfg, ITENS };
+    globalThis.PPX.loja = {
+      comprar,
+      abastecer,
+      conferirEstoque,
+      prepararVenda,
+      auditar,
+      venderAgora,
+      cfg,
+      ITENS,
+    };
 
     // Exposto so para a banca de testes, que executa este arquivo com um DOM de mentira.
     if (typeof module !== 'undefined' && module.exports)
-      module.exports = { comprar, prepararVenda, auditar, venderAgora, cfg };
+      module.exports = {
+        comprar,
+        abastecer,
+        conferirEstoque,
+        // Os rotulos das linhas: e' neles que o estoque lido aparece, e e' isso que se confere.
+        rotulos,
+        lerInventario,
+        alvoDeAgora,
+        prepararVenda,
+        auditar,
+        venderAgora,
+        cfg,
+      };
   },
 );

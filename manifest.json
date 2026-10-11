@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Poke Idle World - qualidade de vida",
-  "version": "1.0.0",
-  "description": "Lanca a pokebola sozinho, faz o ciclo da loja, guarda cacadas e times e troca de cacada por nivel. Alt+Q abre o menu.",
+  "version": "1.1.0",
+  "description": "Captura sozinho, ciclo da loja, cacadas e times guardados, troca de cacada por nivel e para o grafico. Alt+Q abre o menu.",
   "permissions": [
     "storage"
   ],
@@ -21,6 +21,16 @@
         "https://poke.idleworld.online/*"
       ],
       "js": [
+        "sem-grafico.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://poke.idleworld.online/*"
+      ],
+      "js": [
         "pausa.js",
         "agenda.js",
         "captura.js",
@@ -28,7 +38,8 @@
         "ciclo.js",
         "cacadas.js",
         "times.js",
-        "escada.js"
+        "escada.js",
+        "arrumar.js"
       ],
       "run_at": "document_idle"
     }

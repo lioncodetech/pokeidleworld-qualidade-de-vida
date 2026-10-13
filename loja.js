@@ -23,6 +23,14 @@ PPX.modulo(
     // compra sem respiro e' pedir para o servidor achar que e' ataque.
     const PAUSA_COMPRA = 140;
 
+    // Pausa entre escrever a quantidade e reler o que a loja entendeu. O campo e' do React: o
+    // numero so' chega ao estado do jogo depois do evento.
+    const PAUSA_CAMPO = 150;
+
+    // Teto de voltas da compra. Com a barra de quantidade cada volta leva ate' 10.000 unidades,
+    // entao isto nunca aperta quem compra de verdade — aperta o laco que deixou de progredir.
+    const MAX_VOLTAS = 200;
+
     /** A margem com que o alvo e' sorteado, em porcento. Zero compra exatamente ate' o alvo. */
     const VARIACAO_PADRAO = 3;
 
@@ -276,44 +284,118 @@ PPX.modulo(
     // --- compra ----------------------------------------------------------------------------
 
     /**
-     * Compra `qtd` unidades, uma por clique. Para sozinha por tres motivos, e cada um deles e'
-     * um jeito de o jogo dizer que nao da': o botao sumiu, o saldo nao caiu, ou o saldo caiu
-     * abaixo do preco de mais uma. Nenhum deles e' erro — sao limites.
+     * Escreve no campo do jogo.
+     *
+     * O campo e' controlado pelo React: mexer no `.value` direto nao avisa ninguem, e o clique
+     * seguinte compraria a quantidade antiga. O setter nativo mais os eventos e' o que o jogo
+     * escuta. Fora do navegador (nos testes) nao ha' `HTMLInputElement`, e a atribuicao simples
+     * basta — quem precisa de ser avisado ali e' o DOM de mentira.
+     */
+    function escrever(campo, valor) {
+      const classe = globalThis.HTMLInputElement;
+      const setter =
+        classe && campo instanceof classe
+          ? Object.getOwnPropertyDescriptor(classe.prototype, 'value')?.set
+          : null;
+      if (setter) setter.call(campo, String(valor));
+      else campo.value = String(valor);
+      campo.dispatchEvent?.(new Event('input', { bubbles: true }));
+      campo.dispatchEvent?.(new Event('change', { bubbles: true }));
+    }
+
+    /**
+     * Quanto a loja entendeu, lido da barra do proprio jogo e nao do campo onde se escreveu.
+     *
+     * Medido na loja em 13/10/2026: o campo prende o que recebe entre 1 e `max` (10.000) e
+     * devolve **1** a tudo o que nao entende — zero, negativo, texto. Um 1 silencioso e' a
+     * diferenca entre comprar dez mil e comprar um, e e' por isso que se confere.
+     */
+    const quantidadeAceita = (linha) => {
+      const barra = linha?.querySelector('.nsh-range') || linha?.querySelector('.nsh-num');
+      const v = parseInt(barra?.value, 10);
+      return Number.isFinite(v) ? v : null;
+    };
+
+    /** O teto que o proprio campo declara. Sem ele, uma unidade por volta — nunca as cegas. */
+    const tetoDoCampo = (campo) => {
+      const m = parseInt(campo?.max, 10);
+      return Number.isFinite(m) && m > 0 ? m : 1;
+    };
+
+    /**
+     * Compra `qtd` unidades, em lotes.
+     *
+     * A loja ganhou uma barra de quantidade — `.nsh-num` e `.nsh-range`, de 1 a 10.000 —, e o
+     * "Comprar" leva o numero que estiver nela. Antes daqui a compra era um clique por unidade
+     * com a barra em 1: pedir 10.000 Ultra Ball dava 10.000 cliques, e o jogo deixava de
+     * acompanhar muito antes disso — foi assim que um pedido de 10.000 virou 10 compradas.
+     *
+     * Para sozinha por quatro motivos, e cada um deles e' um jeito de o jogo dizer que nao da':
+     * o botao sumiu, a loja nao aceitou a quantidade, o saldo nao caiu, ou o saldo nao paga nem
+     * mais uma. Nenhum deles e' erro — sao limites.
      */
     async function comprar(nome, qtd, aviso) {
       if (!(await abrirAba('Comprar'))) return { comprou: 0, motivo: 'loja fechada' };
-      const linha = linhaDoItem(nome);
-      if (!linha) return { comprou: 0, motivo: 'item fora da loja' };
+      if (!linhaDoItem(nome)) return { comprou: 0, motivo: 'item fora da loja' };
 
       const preco = parseInt(
-        (linha.querySelector('.mks-price')?.textContent || '').replace(/\D/g, ''),
+        (linhaDoItem(nome).querySelector('.mks-price')?.textContent || '').replace(/\D/g, ''),
         10,
       );
       let comprou = 0;
       let parados = 0;
+      let voltas = 0;
 
-      for (let i = 0; i < qtd; i += 1) {
-        const botao = linhaDoItem(nome)?.querySelector('.mks-buy');
+      while (comprou < qtd) {
+        voltas += 1;
+        if (voltas > MAX_VOLTAS) return { comprou, motivo: 'passei do limite de voltas' };
+
+        const linha = linhaDoItem(nome);
+        const botao = linha?.querySelector('.mks-buy');
         if (!botao || botao.disabled) return { comprou, motivo: 'o botao saiu do ar' };
 
         const antes = saldo();
         if (Number.isFinite(preco) && antes !== null && antes < preco)
           return { comprou, motivo: 'dinheiro acabou' };
 
+        // Quanto cabe nesta volta: o que falta, o teto da barra e o que o dinheiro paga.
+        const campo = linha.querySelector('.nsh-num');
+        let lote = qtd - comprou;
+        lote = Math.min(lote, campo ? tetoDoCampo(campo) : 1);
+        if (Number.isFinite(preco) && preco > 0 && antes !== null)
+          lote = Math.min(lote, Math.floor(antes / preco));
+        if (lote < 1) return { comprou, motivo: 'dinheiro acabou' };
+
+        if (campo) {
+          escrever(campo, lote);
+          await esperar(PAUSA_CAMPO);
+          const aceite = quantidadeAceita(linha);
+          if (aceite !== lote)
+            return {
+              comprou,
+              motivo: `pedi ${lote} e a loja ficou em ${aceite === null ? '?' : aceite}`,
+            };
+        }
+
         botao.click();
         await esperar(PAUSA_COMPRA);
 
         const depois = saldo();
-        if (antes !== null && depois !== null && depois >= antes) {
+        const caiu = antes !== null && depois !== null ? antes - depois : null;
+        if (caiu !== null && caiu <= 0) {
           // O jogo nao debitou: ou nao vendeu, ou nao acompanhou. Insistir as cegas e' o
           // caminho mais curto para comprar mil do que nao se queria.
           parados += 1;
           if (parados >= 3) return { comprou, motivo: 'o jogo parou de debitar' };
-        } else {
-          parados = 0;
-          comprou += 1;
+          continue;
         }
-        if (aviso && comprou % 10 === 0) aviso(`${nome}: ${comprou}/${qtd}`);
+        parados = 0;
+        // Quem diz quanto entrou e' o debito, nao o pedido: pedir mil e pagar por cem e' o jogo
+        // a dizer que vendeu cem.
+        const pagas =
+          caiu !== null && Number.isFinite(preco) && preco > 0 ? Math.round(caiu / preco) : lote;
+        comprou += Math.max(1, Math.min(lote, pagas));
+        if (aviso) aviso(`${nome}: ${comprou}/${qtd}`);
       }
       return { comprou, motivo: '' };
     }

@@ -94,6 +94,14 @@ isso é motivo para cancelar, não para seguir: confirmar no escuro é pior do q
 **O jogo nem sempre pergunta.** Com um pokémon selecionado a venda sai direta, sem confirmação.
 Então a ausência do popup não é erro, e um clique de teste "só para ver o popup" é uma venda.
 
+**O jogo pode ganhar um controle onde não havia nenhum.** A loja do Mark passou a ter barra de
+quantidade por linha (`.nsh-num` e `.nsh-range`, 1 a 10.000, medidos em 13/10/2026) e o "Comprar"
+passou a levar o número dela. A ferramenta, que comprava um clique por unidade, continuou
+clicando com a barra em 1: pedido de 10.000, dez compradas. Quando um controle novo aparece entre
+a intenção e o botão, **escrever nele não basta — tem de se reler o que o jogo entendeu**. O
+campo prende o valor entre 1 e o máximo e devolve 1 a tudo o que não entende, e um 1 silencioso é
+indistinguível de um 1 pedido: sem a releitura, a ferramenta compra uma unidade e relata mil.
+
 **Número truncado não é número.** O inventário mostra `9999+`. Quem não sabe quanto tem não pode
 comprar "a diferença" — trate como desconhecido e não aja.
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Poke Idle World - qualidade de vida",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Captura sozinho, ciclo da loja, cacadas e times guardados, troca de cacada por nivel e para o grafico. Alt+Q abre o menu.",
   "permissions": [
     "storage"

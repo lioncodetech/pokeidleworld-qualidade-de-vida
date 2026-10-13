@@ -178,15 +178,28 @@ Tudo medido na loja real em 09/10/2026.
 
 ### Comprar
 
-**Um clique compra uma unidade, e não existe confirmação nenhuma.** Encher o estoque de Ultra
-Ball é centenas de cliques na mão. No painel (Alt+M) você escreve o **estoque alvo** de cada
-item — não a quantidade a comprar. O ciclo lê quanto você já tem e compra só a diferença; 0
-ignora o item.
+No painel (Alt+M) você escreve o **estoque alvo** de cada item — não a quantidade a comprar. O
+ciclo lê quanto você já tem e compra só a diferença; 0 ignora o item.
 
-Ela para sozinha em três situações, e nenhuma delas é erro — são o jogo dizendo que não dá: o
-botão saiu do ar, o dinheiro acabou, ou **o saldo parou de cair**. Esse último é o que importa:
-se o jogo deixa de debitar e a ferramenta continua clicando, ela compra mil do que você não
-queria. Três cliques sem débito e ela desiste.
+**A compra vai pela barra de quantidade da loja**, medida em 13/10/2026: cada linha tem um campo
+e um cursor de 1 a 10.000, e o "Comprar" leva o número que estiver ali. A ferramenta escreve o
+lote, **confere na barra do próprio jogo que ele foi aceito**, e só então clica — uma vez por
+lote. Pedido acima de 10.000 sai em lotes de 10.000.
+
+Essa conferência é o conserto de um defeito real: a loja ganhou a barra, a ferramenta continuou
+clicando com ela em **1**, e um pedido de 10.000 Ultra Ball acabava em 10 compradas. O campo
+prende o que recebe entre 1 e o máximo e **devolve 1 a tudo o que não entende** — então clicar
+sem reler é comprar uma unidade achando que se comprou mil. Se a barra não ficar no número
+pedido, não há clique nenhum: ela para e diz em quanto a loja ficou.
+
+Ela para sozinha em quatro situações, e nenhuma delas é erro — são o jogo dizendo que não dá: o
+botão saiu do ar, a loja não aceitou a quantidade, o dinheiro acabou, ou **o saldo parou de
+cair**. Esse último é o que importa: se o jogo deixa de debitar e a ferramenta continua clicando,
+ela compra mil do que você não queria. Três cliques sem débito e ela desiste.
+
+**Quem diz quanto entrou é o débito, não o pedido.** Pedir 1.000 e o saldo cair o preço de 100 é
+o jogo dizendo que vendeu 100 — é esse o número que a ferramenta conta, e a conferência da
+mochila no fim continua sendo a palavra final.
 
 ### Vender
 

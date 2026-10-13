@@ -59,6 +59,12 @@ function montarLoja({
   // mochila — e no jogo isso quer dizer zero, nao "nao sei". `'9999+'` e' o numero truncado.
   mochila = null,
   semInventario = false,
+  // A barra de quantidade medida na loja em 13/10/2026: `.nsh-num` e `.nsh-range`, de 1 a
+  // `tetoDaBarra`. `semBarra` e' a loja antiga, sem ela. `barraTeimosa` e' o caso que custou
+  // caro: a loja fica em 1 por mais que se escreva.
+  semBarra = false,
+  barraTeimosa = false,
+  tetoDaBarra = 10000,
 } = {}) {
   const compras = [];
   const janela = no('mks-window');
@@ -94,19 +100,46 @@ function montarLoja({
     check.aoClicar = () => {
       check.checked = !check.checked;
     };
+    // A barra de quantidade. O campo prende o que recebe entre 1 e o teto e devolve 1 a tudo o
+    // que nao entende — foi isto que se mediu no jogo, e e' o que faz a conferencia valer.
+    const campo = no('nsh-num');
+    const barra = no('nsh-range');
+    campo.max = String(tetoDaBarra);
+    barra.max = String(tetoDaBarra);
+    let escolhida = 1;
+    const prender = (v) => {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n < 1) return 1;
+      return Math.min(n, tetoDaBarra);
+    };
+    for (const alvo of [campo, barra])
+      Object.defineProperty(alvo, 'value', {
+        get: () => String(escolhida),
+        set(v) {
+          escolhida = barraTeimosa ? 1 : prender(v);
+        },
+      });
+    campo.dispatchEvent = () => {};
+    barra.dispatchEvent = () => {};
+
     const comprar = no('nsh-btn mks-buy', 'Comprar');
     comprar.ehBotao = true;
     comprar.aoClicar = () => {
-      if (saldo >= (l.preco || 0)) {
-        if (!l.naoDebita) saldo -= l.preco || 0;
-        compras.push(l.nome);
-        // O que se compra entra na mochila: e' la' que a conferencia do fim vai olhar.
-        if (sacola && typeof sacola[l.nome] === 'number') sacola[l.nome] += 1;
-        else if (sacola && !(l.nome in sacola)) sacola[l.nome] = 1;
-        atualizarOuro();
-      }
+      const pedidas = semBarra ? 1 : prender(campo.value);
+      const preco1 = l.preco || 0;
+      const cabem = preco1 > 0 ? Math.min(pedidas, Math.floor(saldo / preco1)) : pedidas;
+      if (cabem < 1) return;
+      if (!l.naoDebita) saldo -= preco1 * cabem;
+      for (let i = 0; i < cabem; i += 1) compras.push(l.nome);
+      // O que se compra entra na mochila: e' la' que a conferencia do fim vai olhar.
+      if (sacola && typeof sacola[l.nome] === 'number') sacola[l.nome] += cabem;
+      else if (sacola && !(l.nome in sacola)) sacola[l.nome] = cabem;
+      atualizarOuro();
     };
     linha.filhos.push(nome, preco, meta, check, comprar);
+    if (!semBarra) linha.filhos.push(campo, barra);
+    linha.quantidadeNaTela = () => escolhida;
+    linha.botaoComprar = comprar;
     linha.marcar = (v) => {
       check.checked = v;
     };
@@ -319,11 +352,50 @@ const COMUM = [
   { nome: 'Small Potion', preco: 5, grade: 'Comum' },
 ];
 
-test('compra exatamente a quantidade pedida', async () => {
+test('compra exatamente a quantidade pedida, num clique so', async () => {
   const p = montarLoja({ dinheiro: 100000, linhas: COMUM });
   const r = await p.api.comprar('Ultra Ball', 5);
   assert.equal(r.comprou, 5);
   assert.equal(p.compras.filter((c) => c === 'Ultra Ball').length, 5);
+  // Cinco unidades sao um pedido, nao cinco. Um clique por unidade e' o que fazia o jogo
+  // deixar de acompanhar e um pedido de 10.000 acabar em 10.
+  assert.equal(p.linhas[0].botaoComprar.cliques, 1);
+  assert.equal(p.linhas[0].quantidadeNaTela(), 5);
+});
+
+test('pedido maior que o teto da barra sai em lotes do tamanho do teto', async () => {
+  const p = montarLoja({ dinheiro: 100000000, linhas: COMUM, tetoDaBarra: 1000 });
+  const r = await p.api.comprar('Ultra Ball', 2500);
+  assert.equal(r.comprou, 2500);
+  assert.equal(p.compras.filter((c) => c === 'Ultra Ball').length, 2500);
+  // 1000 + 1000 + 500: tres cliques, e nao 2500.
+  assert.equal(p.linhas[0].botaoComprar.cliques, 3);
+});
+
+test('a loja que nao aceita a quantidade nao leva clique nenhum', async () => {
+  // O caso real: escreve-se 10.000 e a barra fica em 1. Clicar ali compra 1 a pensar que
+  // comprou 10.000 — e e' exactamente o que acontecia.
+  const p = montarLoja({ dinheiro: 100000000, linhas: COMUM, barraTeimosa: true });
+  const r = await p.api.comprar('Ultra Ball', 10000);
+  assert.equal(r.comprou, 0);
+  assert.equal(p.linhas[0].botaoComprar.cliques, 0);
+  assert.equal(p.compras.length, 0);
+  assert.match(r.motivo, /pedi 10000 e a loja ficou em 1/);
+});
+
+test('loja sem barra de quantidade compra uma por clique, e nao as cegas', async () => {
+  const p = montarLoja({ dinheiro: 100000, linhas: COMUM, semBarra: true });
+  const r = await p.api.comprar('Ultra Ball', 4);
+  assert.equal(r.comprou, 4);
+  assert.equal(p.linhas[0].botaoComprar.cliques, 4);
+});
+
+test('quem diz quanto entrou e o debito, e nao o pedido', async () => {
+  // A loja so' tem dinheiro para 7, mas aceita o pedido de 20: o jogo vende 7 e debita 7.
+  const p = montarLoja({ dinheiro: 7 * 130, linhas: COMUM });
+  const r = await p.api.comprar('Ultra Ball', 20);
+  assert.equal(r.comprou, 7);
+  assert.equal(r.motivo, 'dinheiro acabou');
 });
 
 test('para quando o dinheiro acaba, em vez de martelar', async () => {
@@ -342,7 +414,9 @@ test('para quando o jogo deixa de debitar', async () => {
   });
   const r = await p.api.comprar('Ultra Ball', 50);
   assert.equal(r.motivo, 'o jogo parou de debitar');
-  assert.ok(p.compras.length <= 3, `parou cedo, e nao em ${p.compras.length} cliques`);
+  const cliques = p.linhas[0].botaoComprar.cliques;
+  assert.ok(cliques <= 3, `parou cedo, e nao em ${cliques} cliques`);
+  assert.equal(r.comprou, 0);
 });
 
 test('venda: nao segue com um lendario marcado', async () => {

@@ -21,6 +21,14 @@ PPX.modulo(
 
     const MINHA_VEZ = 'cacadas';
     const CHAVE = 'lioncode:pokeidleworld:cacadas';
+    const CHAVE_CATALOGO = 'lioncode:pokeidleworld:cacadas:catalogo';
+    const PRAZO_CATALOGO = 24 * 60 * 60 * 1000;
+    const REGIOES = {
+      kanto: { nome: 'Kanto', nivel: 0 },
+      outland: { nome: 'Outland', nivel: 150 },
+      orre: { nome: 'Orre', nivel: 500 },
+      nightmare: { nome: 'Nightmare', nivel: 2000 },
+    };
 
     // O compasso vem do `pausa.js`, que tem um dono so': a pausa pedida e' o chao, e por cima
     // dela vai um sorteio. Sem o modulo (num teste, por exemplo) espera-se o pedido, e pronto.
@@ -164,6 +172,61 @@ PPX.modulo(
       }
     };
 
+    // --- o catalogo do jogo ------------------------------------------------------------------
+    //
+    // O mapa passou a publicar a lista inteira em `/api/game/map-markers`: hoje sao 451 hunts,
+    // inclusive Orre e Nightmare antes de a conta as destrancar. Ler esta fonte e' melhor do que
+    // clicar nas quatro placas: uma placa bloqueada ja' nao troca de regiao (medido em 15/10/2026).
+    // O DOM continua sendo a porta da viagem; o endpoint e' usado somente para listar.
+
+    let catalogo = { quando: 0, hunts: [] };
+    try {
+      const cru = JSON.parse(localStorage.getItem(CHAVE_CATALOGO) || 'null');
+      if (cru && Array.isArray(cru.hunts)) catalogo = cru;
+    } catch {
+      /* sem catalogo guardado: a lista sera lida do jogo */
+    }
+
+    const normalizarCatalogo = (resposta) =>
+      (Array.isArray(resposta?.hunts) ? resposta.hunts : [])
+        .filter((h) => h?.name && Number(h?.level) > 0 && REGIOES[h?.area])
+        .map((h) => ({
+          nome: String(h.name),
+          nivel: Number(h.level),
+          regiao: REGIOES[h.area].nome,
+          area: String(h.area),
+          tipos: [...(globalThis.PPX_TIPOS_HUNTS?.[h.name] || [])],
+        }))
+        .sort((a, b) =>
+          a.nivel - b.nivel || a.regiao.localeCompare(b.regiao) || a.nome.localeCompare(b.nome),
+        );
+
+    const nivelTreinador = () =>
+      Number((document.querySelector('.phud-tloc')?.textContent || '').match(/\d+/)?.[0] || 0);
+
+    async function atualizarCatalogo(forcar = false) {
+      const fresco = catalogo.hunts.length && Date.now() - Number(catalogo.quando || 0) < PRAZO_CATALOGO;
+      if (!forcar && fresco) return catalogo.hunts;
+      const resposta = await fetch('/api/game/map-markers', { credentials: 'same-origin' });
+      if (!resposta.ok) throw new Error(`map-markers HTTP ${resposta.status}`);
+      catalogo = { quando: Date.now(), hunts: normalizarCatalogo(await resposta.json()) };
+      localStorage.setItem(CHAVE_CATALOGO, JSON.stringify(catalogo));
+      return catalogo.hunts;
+    }
+
+    const todasConhecidas = () => {
+      const nivel = nivelTreinador();
+      const comEstado = catalogo.hunts.map((h) => ({
+        ...h,
+        tipos: [...(h.tipos || globalThis.PPX_TIPOS_HUNTS?.[h.nome] || [])],
+        trancada: nivel < (REGIOES[h.area]?.nivel || 0),
+      }));
+      const porNome = new Map(comEstado.map((h) => [h.nome, h]));
+      const minhas = cfg.lista.map((c) => ({ ...porNome.get(c.nome), ...c, guardada: true }));
+      const guardadas = new Set(cfg.lista.map((c) => c.nome));
+      return [...minhas, ...comEstado.filter((h) => !guardadas.has(h.nome))];
+    };
+
     /**
      * Guarda a caçada atual.
      *
@@ -181,6 +244,14 @@ PPX.modulo(
       cfg.lista.push({ nome: aqui, time: '' });
       gravar();
       return `Guardada: "${aqui}".`;
+    }
+
+    function salvarNome(nome) {
+      if (!nome) return 'Nenhuma caçada escolhida.';
+      if (cfg.lista.some((c) => c.nome === nome)) return `"${nome}" ja esta na lista.`;
+      cfg.lista.push({ nome, time: '' });
+      gravar();
+      return `Guardada: "${nome}".`;
     }
 
     function apagar(nome) {
@@ -273,6 +344,9 @@ PPX.modulo(
 
     async function ir(hunt, aviso = () => {}, { time } = {}) {
       if (!hunt) return 'Nenhuma caçada escolhida.';
+      const conhecida = todasConhecidas().find((c) => c.nome === hunt);
+      if (conhecida?.trancada)
+        return `"${hunt}" fica em ${conhecida.regiao}, que o seu nivel ainda nao destranca.`;
       const alvo = cfg.lista.find((c) => c.nome === hunt) || { nome: hunt, time: '' };
       // Quem chama pode mandar outro time, e entao e' o dele que vale: a Escada escolhe o time
       // no proprio degrau, porque a mesma caçada serve a niveis diferentes com equipes
@@ -362,9 +436,20 @@ PPX.modulo(
       'font:11.5px system-ui,sans-serif}',
       // Sem time escolhido o seletor e' so' ruido: fica apagado ate' valer alguma coisa.
       '.cjx-time.sem{color:#8b97a8}',
+      '.cjx-filtro{display:flex;gap:5px;margin:0 0 7px}',
+      '.cjx-filtro input{min-width:0;flex:1;background:#0b0e14;color:#e6e9ef;',
+      'border:1px solid #3a4152;border-radius:5px;padding:5px 7px;font:11.5px system-ui,sans-serif}',
+      '.cjx-filtro button{width:30px!important;margin:0!important;padding:3px!important}',
+      '.cjx-meta{display:block;font-size:10px;color:#8b97a8;font-weight:400}',
+      '.cjx-trancada{opacity:.58}',
+      '.cjx-conta{font-size:10px;opacity:.65;margin:5px 0}',
+      '.cjx-resumo{display:none;font-size:11px;opacity:.8;line-height:1.3;margin:4px 0}',
+      '.cjx.compacto .cjx-resumo{display:block}',
       // Modo compacto: fica o nome da caçada e o Ir, que e' o uso de todo dia. Guardar e apagar
       // sao de arrumar a lista, e arrumar a lista nao se faz todo dia.
       '.cjx.compacto .cjx-guardar,.cjx.compacto .cjx-status,.cjx.compacto .cjx-time,',
+      '.cjx.compacto .cjx-filtro,.cjx.compacto .cjx-conta,',
+      '.cjx.compacto .cjx-lista,',
       '.cjx.compacto .cjx-l .cjx-fora{display:none}',
       '.cjx.compacto .cjx-l{margin:2px 0}',
     ].join('');
@@ -426,22 +511,52 @@ PPX.modulo(
       return sel;
     }
 
+    const chao = (txt) =>
+      String(txt || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    const TETO = 80;
+    let filtro = '';
+
     function pintarLista() {
+      const resumo = painel?.querySelector('.cjx-resumo');
+      if (resumo)
+        resumo.textContent = `${local() || 'Local não lido'} · ${catalogo.hunts.length || '…'} hunts · ${cfg.lista.length} favoritas`;
       const lista = painel?.querySelector('.cjx-lista');
       if (!lista) return;
       lista.textContent = '';
-      if (!cfg.lista.length) {
+      const busca = chao(filtro.trim());
+      const todas = todasConhecidas().filter(
+        (c) =>
+          (!cfg.compacto || c.guardada) &&
+          (!busca ||
+            chao(`${c.nome} ${c.nivel ? `lv ${c.nivel}` : ''} ${c.regiao || ''}`).includes(busca)),
+      );
+      if (!todas.length) {
         const vazio = document.createElement('div');
         vazio.className = 'cjx-vazio';
-        vazio.textContent = 'Nenhuma caçada guardada ainda.';
+        vazio.textContent = filtro.trim()
+          ? `Nada com "${filtro.trim()}".`
+          : catalogo.hunts.length
+            ? 'Nenhuma caçada encontrada.'
+            : 'Lendo a lista de caçadas do jogo…';
         lista.appendChild(vazio);
         return;
       }
-      for (const alvo of cfg.lista) {
+      for (const alvo of todas.slice(0, TETO)) {
         const l = document.createElement('div');
-        l.className = 'cjx-l';
+        l.className = `cjx-l${alvo.trancada ? ' cjx-trancada' : ''}`;
         const b = document.createElement('b');
         b.textContent = alvo.nome;
+        if (alvo.nivel || alvo.regiao) {
+          const meta = document.createElement('small');
+          meta.className = 'cjx-meta';
+          meta.textContent = [alvo.nivel ? `Lv ${alvo.nivel}` : '', alvo.regiao || '', alvo.trancada ? 'trancada' : '']
+            .filter(Boolean)
+            .join(' · ');
+          b.appendChild(meta);
+        }
         const usar = document.createElement('button');
         usar.textContent = '▶ Ir';
         usar.addEventListener('click', async () => {
@@ -450,15 +565,21 @@ PPX.modulo(
         });
         const fora = document.createElement('button');
         fora.className = 'cjx-fora';
-        fora.textContent = '×';
-        fora.title = 'Tirar da lista';
+        fora.textContent = alvo.guardada ? '×' : '＋';
+        fora.title = alvo.guardada ? 'Tirar dos atalhos' : 'Guardar nos atalhos';
         fora.addEventListener('click', () => {
-          diz(apagar(alvo.nome));
+          diz(alvo.guardada ? apagar(alvo.nome) : salvarNome(alvo.nome));
           pintarLista();
         });
         l.append(b, usar, fora);
         lista.appendChild(l);
-        lista.appendChild(seletorDeTime(alvo));
+        if (alvo.guardada) lista.appendChild(seletorDeTime(alvo));
+      }
+      if (todas.length > TETO) {
+        const conta = document.createElement('div');
+        conta.className = 'cjx-conta';
+        conta.textContent = `…e mais ${todas.length - TETO}. Escreva mais no filtro.`;
+        lista.appendChild(conta);
       }
     }
 
@@ -484,6 +605,7 @@ PPX.modulo(
         cfg.compacto = !cfg.compacto;
         gravar();
         aplicarModo();
+        pintarLista();
       });
 
       const fechar = document.createElement('button');
@@ -496,6 +618,38 @@ PPX.modulo(
       cantos.append(encolher, fechar);
       barra.append(titulo, cantos);
       painel.appendChild(barra);
+
+      const busca = document.createElement('div');
+      busca.className = 'cjx-filtro';
+      const campoBusca = document.createElement('input');
+      campoBusca.type = 'search';
+      campoBusca.placeholder = 'filtrar por nome, nível ou região';
+      campoBusca.addEventListener('input', () => {
+        filtro = campoBusca.value || '';
+        pintarLista();
+      });
+      const atualizar = document.createElement('button');
+      atualizar.textContent = '↻';
+      atualizar.title = 'Reler todas as caçadas do jogo';
+      atualizar.addEventListener('click', async () => {
+        atualizar.disabled = true;
+        diz('Relendo todas as caçadas do jogo…');
+        try {
+          const hunts = await atualizarCatalogo(true);
+          diz(`${hunts.length} caçadas lidas do jogo.`);
+          pintarLista();
+        } catch (e) {
+          diz(`Não consegui ler as caçadas: ${String(e?.message || e)}.`);
+        } finally {
+          atualizar.disabled = false;
+        }
+      });
+      busca.append(campoBusca, atualizar);
+      painel.appendChild(busca);
+
+      const resumo = document.createElement('div');
+      resumo.className = 'cjx-resumo';
+      painel.appendChild(resumo);
 
       const lista = document.createElement('div');
       lista.className = 'cjx-lista';
@@ -535,6 +689,12 @@ PPX.modulo(
         }) || (() => false);
       aplicarModo();
       pintarLista();
+      atualizarCatalogo()
+        .then((hunts) => {
+          pintarLista();
+          if (hunts.length) diz(`${hunts.length} caçadas disponíveis.`);
+        })
+        .catch((e) => diz(`Não consegui ler as caçadas: ${String(e?.message || e)}.`));
       return painel;
     }
 
@@ -588,9 +748,18 @@ PPX.modulo(
     globalThis.PPX?.controlar?.('cacadas', (sim) => mostrar(sim));
 
     globalThis.PPX = globalThis.PPX || {};
-    globalThis.PPX.cacadas = { salvar, apagar, ir, local, cfg };
+    globalThis.PPX.cacadas = {
+      salvar,
+      apagar,
+      ir,
+      local,
+      cfg,
+      todas: () => todasConhecidas().map((c) => ({ ...c })),
+      atualizar: atualizarCatalogo,
+      nivelDe: (nome) => todasConhecidas().find((c) => c.nome === nome)?.nivel || 0,
+    };
 
     if (typeof module !== 'undefined' && module.exports)
-      module.exports = { salvar, apagar, ir, local, viajar, cfg };
+      module.exports = { salvar, salvarNome, apagar, ir, local, viajar, atualizarCatalogo, todasConhecidas, cfg };
   },
 );

@@ -73,9 +73,10 @@ function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Rout
 
   const invSlots = Object.entries(estoqueDe).map(([nome, qtd]) => {
     const s = no('inv-slot');
+    const valor = typeof qtd === 'object' ? qtd : { texto: qtd };
     s.querySelector = (sel) => {
       if (sel === 'img') return { alt: nome };
-      if (sel === '.inv-qty') return { textContent: String(qtd) };
+      if (sel === '.inv-qty') return { textContent: String(valor.texto), title: valor.title || '' };
       return null;
     };
     return s;
@@ -178,6 +179,37 @@ test('nunca clica na slot machine ao procurar o Mark', async () => {
   assert.ok(true);
 });
 
+test('o ciclo protege, vende e so depois compra', () => {
+  const proteger = fonte.indexOf('await times.protegerItensAqui(nota, interrompido)');
+  const vender = fonte.indexOf('await vender()', proteger);
+  const comprar = fonte.indexOf('await loja.abastecer(nota)', vender);
+  assert.ok(proteger >= 0, 'inclui a proteção no Depósito da Família');
+  assert.ok(proteger < vender, 'protege antes de vender');
+  assert.ok(vender < comprar, 'vende antes de comprar');
+});
+
+test('atalho e agenda usam a venda conjunta de pokemon e itens', () => {
+  assert.match(fonte, /rodar\(l\.venderTudo \|\| l\.venderAgora, l\.comprar\)/);
+  assert.ok(
+    fonte.match(/rodar\(l\.venderTudo \|\| l\.venderAgora, l\.comprar\)/g)?.length >= 2,
+    'atalho e agenda usam venderTudo',
+  );
+});
+
+test('botao de parada interrompe um ciclo em andamento', async () => {
+  const p = montar({ loc: 'Cerulean' });
+  const fim = p.api.rodar(() => {}, () => {});
+  assert.equal(p.api.rodando(), true);
+  assert.equal(p.api.parar(), true);
+  await fim;
+  assert.equal(p.api.rodando(), false);
+  assert.equal(p.api.parar(), false, 'parar de novo nao inventa um ciclo');
+});
+
+test('saindo de Cerulean nao tenta voltar a Cerulean pelo mapa', () => {
+  assert.match(fonte, /!\/\^\(Cerulean\|Market\|Shopping\)\$\/i\.test\(hunt\)/);
+});
+
 test('reconhece o Mark pelo que o dialogo diz, nao pela posicao', async () => {
   const p = montar({ markEm: 2 });
   assert.equal(await p.api.acharMark(), true);
@@ -194,6 +226,11 @@ test('"9999+" nao vira um numero: estoque desconhecido', async () => {
   // numero que nao e' verdade.
   const p = montar({ estoqueDe: { 'Ultra Ball': '9999+' } });
   assert.equal(await p.api.estoque('Ultra Ball'), Infinity);
+});
+
+test('tooltip do 9999+ devolve o estoque exato', async () => {
+  const p = montar({ estoqueDe: { 'Ultra Ball': { texto: '9999+', title: 'Quantidade: 54.321' } } });
+  assert.equal(await p.api.estoque('Ultra Ball'), 54321);
 });
 
 test('le o estoque exato quando o jogo o mostra', async () => {

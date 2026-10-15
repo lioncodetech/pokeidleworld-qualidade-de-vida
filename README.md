@@ -7,7 +7,7 @@ Extensão de navegador para o [Poke Idle World](https://poke.idleworld.online).
 | Captura automática | lança a pokébola assim que aparece um selvagem | Alt+C liga · Alt+V desliga |
 | Loja do Mark | compra em lote e vende com auditoria | Alt+L esconde · Alt+M mostra |
 | Ciclo da loja | sai da caçada, vende, reabastece e volta | Alt+K roda |
-| Caçadas | guarda as caçadas que você usa e volta a qualquer uma | Alt+W esconde · Alt+E mostra |
+| Caçadas | lista todas as caçadas do jogo, guarda favoritas e viaja num clique | Alt+W esconde · Alt+E mostra |
 | Times | guarda equipes de seis e as remonta | Alt+T esconde · Alt+Y mostra |
 | Escada de caçadas | troca de caçada sozinha quando o líder sobe de nível, e roda a equipe inteira até o teto | Alt+B esconde · Alt+N mostra |
 | Arrumar os painéis | põe cada janela no canto dela, guarda arrumações suas e manda-as às outras janelas | Alt+U esconde · Alt+J mostra · Alt+Shift+J arruma |
@@ -155,9 +155,12 @@ nove itens).
 **🎒 Conferir a mochila.** Um botão no painel: abre o inventário, lê quanto há de cada item,
 fecha, e escreve o número **ao lado de cada linha** (`Ultra Ball · tem 8`). Sem ele o estoque só
 aparecia depois de uma compra — e quem quer *decidir* o alvo precisa de ver quanto tem antes de
-gastar. O `9999+` do jogo continua `9999+` ali: mostrar `9999` seria inventar o que o jogo não
-disse. As duas leituras da compra pintam o mesmo lugar, então abrir o painel depois de um ciclo
-já mostra os números dele.
+gastar. Quando o jogo escreve `9999+`, a ferramenta lê a quantidade exata que aparece no tooltip
+ao passar o mouse. Como esse número não existe no HTML parado, a extensão aciona o hover de cada
+slot truncado e captura o tooltip dinâmico; só mantém `9999+` quando ele não traz um número
+confiável. As duas
+leituras da compra pintam o mesmo lugar, então abrir o painel depois de um ciclo já mostra os
+números dele.
 
 **Variar o alvo em ± (%)**, igual ao pacote do PokePixel: com 3%, um alvo de 20.000 vira algo
 entre 19.400 e 20.600, sorteado a cada compra. Sem isso a mochila termina sempre no mesmo número
@@ -165,8 +168,9 @@ redondo, compra após compra. Zero compra exatamente até o alvo.
 
 Item que **não aparece** na mochila tem zero, não "não sei" — tratar como desconhecido faria
 justamente os itens acabados, os que mais precisam de compra, serem os únicos nunca comprados.
-Já o `9999+` do jogo é desconhecido mesmo: número truncado não é número, e quem não sabe quanto
-tem não pode comprar "a diferença".
+Já o `9999+` sem quantidade exata no tooltip continua desconhecido: número truncado não é número,
+e quem não sabe quanto tem não pode comprar "a diferença". Com tooltip exato, por exemplo
+`12.345`, um alvo de `12.350` compra apenas 5, respeitando também a variação em porcentagem.
 
 **O "Máx. por vez" saiu.** Era um teto que recusava a venda acima de N linhas selecionadas, e foi
 retirado a pedido — quem vende clica em "Selecionar tudo", e o teto só atrapalhava. Vale dizer o
@@ -207,7 +211,8 @@ O jogo já faz quase tudo: filtro por grade, checkbox por linha, "Selecionar tud
 anuncia o estrago antes de acontecer — `Vender (73) · 💲1.314.000`. O que falta é não depender da
 sua memória para aplicar os filtros certos toda vez.
 
-A ferramenta aplica o filtro, marca tudo, **audita, e para**. O clique final em Vender é seu.
+A preparação manual aplica o filtro, marca tudo, **audita, e para**. No ciclo automático, a mesma
+auditoria é feita antes de cada venda e o clique só acontece se todas as conferências baterem.
 
 **A auditoria não confia no filtro.** Desligar as grades altas e torcer para a lista ter
 atualizado é confiar num render. Em vez disso ela lê a grade de cada linha que ficou marcada
@@ -217,18 +222,25 @@ o filtro funcionado ou não. Achou um protegido, desmarca e audita de novo; se p
 E há um segundo guarda: **a conta do jogo tem de bater com a da tela.** Se o botão diz 73 e o DOM
 mostra 71, alguém está vendo uma lista que o outro não vê — e aí não se vende nada.
 
-Nunca se vende Lendária, Mítica, Anciã ou Divina. A lista não é configurável de propósito.
+Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se vende `Poke Card
+Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
+`Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
 ## O ciclo (Alt+K)
 
 Faz a volta inteira sozinho:
 
 1. anota onde você está (`.phud-tloc` diz a caçada atual);
-2. volta para Cerulean e entra no mercado;
-3. anda para o norte até o Mark e abre a loja;
-4. vende de Épica para baixo, com a auditoria;
-5. compra cada item até o estoque alvo;
-6. **volta para a caçada de onde saiu.**
+2. volta para Cerulean e abre **Depósito → Família: Itens**;
+3. move somente os sete tipos de item protegidos para o depósito da família;
+4. entra no mercado, anda para o norte até o Mark e abre a loja;
+5. vende Pokémon de Épica para baixo e depois os itens restantes, sempre com auditoria;
+6. compra cada item até o estoque alvo, usando a quantidade exata do tooltip da mochila;
+7. **volta para a caçada de onde saiu.**
+
+O botão **⏹ Parar ciclo** solicita uma parada segura: não inicia a próxima ação, fecha a janela
+que o próprio ciclo abriu e libera a fila para as outras ferramentas. Se o ciclo não estiver
+rodando, o botão apenas informa isso.
 
 Cada etapa confirma que aconteceu antes da seguinte — nenhuma é assumida. Se uma falhar, o ciclo
 para e **mesmo assim tenta voltar para a caçada**: ficar parado no shopping é pior do que não ter
@@ -245,9 +257,23 @@ e no DOM todos são `Conversar`. Então o ciclo fala e **lê o diálogo**: só s
 apresenta como Mark. E só tenta botões `Conversar`, nunca `Usar máquina` — essa é a slot machine,
 e apostar por engano seria o pior jeito possível de descobrir o erro.
 
-**Não compra sem saber o estoque.** O inventário trunca a exibição em `9999+`. Isso não é um
-número, então o ciclo trata como desconhecido e não compra — tratar como 9999 faria ele comprar a
-diferença de uma quantidade que não é verdade.
+**Não compra sem saber o estoque.** O inventário trunca a exibição em `9999+`, mas o tooltip traz
+a quantidade real. O ciclo usa esse valor exato; se o tooltip não existir ou não contiver um
+número, trata como desconhecido e não compra.
+
+**Não vende se a proteção falhar.** Se o Depósito da Família não abrir ou qualquer item protegido
+continuar na bolsa depois do clique, o ciclo para antes de abrir a venda. A auditoria da loja ainda
+desmarca esses mesmos itens uma segunda vez como trava independente.
+
+Itens com quantidade 1 podem aparecer sem número e sem a classe normal de linha — é o caso real
+do `Bronze Boss Token`. A proteção procura os nomes na janela inteira de **Família: Itens** e
+reconhece como mochila somente o slot cujo ancestral contém uma seta para a direita. Assim ela
+não depende do contador, da classe da linha ou da coluna e não confunde com os itens já guardados,
+que têm seta para a esquerda.
+
+**Chega perto antes de clicar.** As placas do Depot aparecem no DOM mesmo quando estão longe e
+fora da tela, mas o jogo ignora o clique distante. O ciclo mede onde a placa está, caminha até ela
+e só continua depois de confirmar que a janela do Depósito abriu.
 
 **Não viaja para o lugar errado.** Se não achar a caçada no mapa na volta, fica parado e avisa.
 
@@ -358,8 +384,14 @@ ida ao mercado, e pedir de novo seria ficar à espera de si próprio.
 
 ## Caçadas (Alt+W)
 
-Guarda as caçadas que você usa e volta a qualquer uma num clique. **📌 Guardar onde estou**
-acrescenta a atual à lista; cada linha tem **▶ Ir** e um **×** que tira da lista.
+Lista todas as caçadas publicadas pelo jogo — inclusive as de Outland, Orre e Nightmare antes de
+a conta destrancar essas regiões. A busca aceita nome, nível ou região; cada linha mostra o nível
+e a região, e avisa quando ela ainda está trancada. A lista é renovada automaticamente uma vez
+por dia, e o botão **↻** força uma atualização na hora.
+
+**📌 Guardar onde estou** acrescenta a atual às favoritas. Nas demais linhas, **+** guarda a
+caçada; nas favoritas, **×** tira da lista. **▶ Ir** continua levando até ela num clique. O modo
+minimizado mostra somente as favoritas, para continuar servindo como a antiga lista de atalhos.
 
 **Não guarda cidade.** Clicar em guardar parado no Shopping, em Cerulean ou no Mercado não grava
 nada — senão a lista de atalhos para caçar viraria uma lista de atalhos para ir fazer compras.
@@ -380,10 +412,45 @@ O caminho até a caçada já estava medido no ciclo da loja, e é repetido aqui 
 ferramenta do pacote pode estar desligada sozinha, e uma depender da outra para algo tão básico
 seria trocar quinze linhas repetidas por uma falha calada.
 
-## Escada de caçadas (Alt+P)
+## Escada de caçadas (Alt+B esconde · Alt+N mostra)
 
 Um degrau é *"a partir do nível N, caçar em tal lugar"*. Monte a escada, ligue a caixa, e ela
 troca de caçada sozinha conforme o líder sobe.
+
+### Escolha automática por tipo e pool de times
+
+Marque **escolher hunt automaticamente pelo tipo** para trocar o nome fixo de cada degrau por
+duas faixas de nível:
+
+```
+Pokémon chega ao Lv 30  → procurar uma hunt Lv 20
+Pokémon chega ao Lv 180 → procurar uma hunt Lv 150
+```
+
+A ferramenta procura no catálogo completo uma hunt daquele nível que esteja destrancada. Primeiro
+prioriza uma em que o tipo do líder cause dano super-efetivo; se não houver, aceita dano neutro.
+Hunts em que o ataque fique resistido ou imune são excluídas. Ela também olha a direção contrária:
+se **todas** as hunts daquele nível tiverem vantagem contra o líder, permanece na hunt atual,
+marca aquele degrau como avaliado e só tenta escolher novamente no próximo marco da escada. A
+tabela de tipos das 451 hunts
+fica dentro da própria extensão, portanto a decisão não depende de internet ou de uma API externa
+durante o treino.
+
+No mesmo modo aparecem os **times da pool para upar**. Marque quantos times guardados quiser e
+defina **Formar no Lv** como level cap. A escada monta o primeiro time, sobe cada Pokémon da equipe
+até o cap, monta o próximo time marcado e recomeça a escada com o nível do novo líder. Só considera
+a pool concluída quando todos os Pokémon de todos os times escolhidos alcançarem o cap.
+
+O modo manual anterior continua disponível: desmarque a escolha automática e cada degrau volta a
+usar uma hunt fixa e o seletor único de time.
+
+O botão **⏸ Pausar** congela a automação sem perder o aluno, o degrau aplicado nem o time atual da
+pool. **▶ Retomar** continua exatamente desse ponto. Isso é diferente de **Parar/Iniciar**, que
+reinicia a avaliação do degrau atual.
+
+Ao minimizar, a Escada mostra somente estado, líder, local, cap e progresso da pool; degraus e
+configurações somem. O painel Caçadas também deixa de listar hunts e mostra apenas local, total do
+catálogo e quantidade de favoritas.
 
 ```
 Lv 1   → Meowth
@@ -443,8 +510,9 @@ cima do que você acabou de pedir. Se você já está lá, ela diz isso em vez d
 
 **Quem viaja são as Caçadas (Alt+W).** Esta ferramenta só decide *quando* e *com quem*; a viagem,
 a montagem do time e a passagem pela Nurse Joy vêm de lá de graça. Sem as Caçadas ligadas
-ela diz isso em vez de tentar. As caçadas do menu são as que você guardou lá — uma que sumiu da
-lista fica aqui marcada, em vez de desaparecer em silêncio.
+ela diz isso em vez de tentar. O campo de cada degrau pesquisa no catálogo completo das Caçadas
+e mostra nível, região e bloqueio nas sugestões — não é mais preciso entrar numa hunt e salvá-la
+antes de montar a escada.
 
 ### O que foi medido, e que decidiu o código
 

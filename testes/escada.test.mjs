@@ -131,6 +131,14 @@ function montar({
   // Qual caixa leva o `active`. No jogo e' sempre a primeira; serve para provar que quem manda
   // e' a classe, e nao o lugar na fila.
   ativoEm = 0,
+  catalogo = [],
+  tipos = {},
+  automatico = false,
+  pausada = false,
+  pool = [],
+  timeAtivo = '',
+  timesConcluidos = [],
+  timesGuardados = null,
 } = {}) {
   let local = onde;
   let escondida = oculto;
@@ -156,6 +164,7 @@ function montar({
           : s === '.phud-lv'
             ? { textContent: `Lv.${p.nivel}` }
             : null,
+      querySelectorAll: (s) => s === 'img[alt]' ? (tipos[p.nome] || []).map((alt) => ({ alt })) : [],
       classList: { contains: (c) => c === 'active' && i === ativoEm },
       getAttribute: (a) =>
         a !== 'title'
@@ -189,6 +198,11 @@ function montar({
           formados,
           aluno,
               trocar,
+          automatico,
+          pausada,
+          pool,
+          timeAtivo,
+          timesConcluidos,
           ...(time === undefined ? {} : { time }),
         }),
   };
@@ -201,6 +215,7 @@ function montar({
   if (!semCacadas)
     PPX.cacadas = {
       cfg: { lista: [{ nome: 'Meowth', time: '' }, { nome: 'Persian', time: '' }] },
+      todas: () => catalogo,
       ir: async (nome, _aviso, opcoes) => {
         viagens.push(nome);
         pedidos.push(opcoes);
@@ -210,6 +225,16 @@ function montar({
         if (ordemDoTime && opcoes?.time)
           time6.sort((a, b) => ordemDoTime.indexOf(a.nome) - ordemDoTime.indexOf(b.nome));
         return `Em "${local}".`;
+      },
+    };
+  const timesMontados = [];
+  if (timesGuardados)
+    PPX.times = {
+      nomes: () => Object.keys(timesGuardados),
+      usar: async (nome) => {
+        timesMontados.push(nome);
+        time6.splice(0, time6.length, ...(timesGuardados[nome] || []).map((p) => ({ ...p })));
+        return { ok: true, erro: '' };
       },
     };
   globalThis.PPX = PPX;
@@ -276,6 +301,7 @@ function montar({
     pronto: () => new Promise((r) => globalThis.setTimeout(r, 30)),
     viagens,
     pedidos,
+    timesMontados,
     guardado,
     cliques,
     equipeAgora: () => time6.map((p) => `${p.nome} ${p.nivel}`),
@@ -342,6 +368,111 @@ function montar({
     },
   };
 }
+
+test('seletor da escada usa o catalogo completo das Cacadas', () => {
+  assert.match(fonte, /PPX\?\.cacadas\?\.todas\?\.\(\)/);
+  assert.match(fonte, /createElement\('datalist'\)/);
+  assert.match(fonte, /esx-cacadas-do-jogo/);
+  assert.match(fonte, /c\.trancada \? 'trancada'/);
+});
+
+test('modo compacto esconde degraus, pool e configuracoes', () => {
+  assert.match(fonte, /\.esx\.compacto \.esx-lista/);
+  assert.match(fonte, /\.esx\.compacto \.esx-timebox/);
+  assert.match(fonte, /\.esx\.compacto \.esx-auto/);
+  assert.match(fonte, /pool \$\{cfg\.timesConcluidos\.length\}\/\$\{cfg\.pool\.length\}/);
+});
+
+test('modo automatico escolhe hunt do nivel pedido com vantagem de tipo', async () => {
+  const p = montar({
+    lider: 30,
+    onde: 'Meowth',
+    automatico: true,
+    degraus: [{ nivel: 30, nivelHunt: 20, cacada: '' }],
+    tipos: { Gloom: ['GRASS'] },
+    catalogo: [
+      { nome: 'Geodude', nivel: 20, tipos: ['ROCK', 'GROUND'], trancada: false },
+      { nome: 'Growlithe', nivel: 20, tipos: ['FIRE'], trancada: false },
+      { nome: 'Onix', nivel: 25, tipos: ['ROCK', 'GROUND'], trancada: false },
+    ],
+  });
+  await p.pronto();
+
+  assert.deepEqual(p.viagens, ['Geodude']);
+});
+
+test('modo automatico recusa hunt onde o ataque fica em desvantagem', async () => {
+  const p = montar({
+    lider: 30,
+    automatico: true,
+    degraus: [{ nivel: 30, nivelHunt: 20, cacada: '' }],
+    tipos: { Gloom: ['GRASS'] },
+    catalogo: [{ nome: 'Growlithe', nivel: 20, tipos: ['FIRE'], trancada: false }],
+  });
+  await p.pronto();
+
+  assert.deepEqual(p.viagens, []);
+  assert.equal(p.api.cfg.aplicado, 30, 'nao volta a tentar no mesmo marco');
+});
+
+test('hunt perigosa fica para tras e so tenta de novo no proximo marco', async () => {
+  const p = montar({
+    lider: 30,
+    automatico: true,
+    degraus: [
+      { nivel: 30, nivelHunt: 20, cacada: '' },
+      { nivel: 40, nivelHunt: 25, cacada: '' },
+    ],
+    tipos: { Gloom: ['GRASS'] },
+    catalogo: [
+      { nome: 'Growlithe', nivel: 20, tipos: ['FIRE'], trancada: false },
+      { nome: 'Geodude', nivel: 25, tipos: ['ROCK'], trancada: false },
+    ],
+  });
+  await p.pronto();
+  p.subirPara(31);
+  await p.api.conferir(() => {});
+  assert.deepEqual(p.viagens, [], 'nao tentou outra vez antes do proximo degrau');
+
+  p.subirPara(40);
+  await p.api.conferir(() => {});
+  assert.deepEqual(p.viagens, ['Geodude'], 'reavaliou ao chegar ao marco seguinte');
+});
+
+test('pausar congela e retomar continua sem apagar o degrau', async () => {
+  const p = montar({ lider: 50, onde: 'Meowth', degraus: ESCADA, pausada: true });
+  await p.pronto();
+  await p.api.conferir(() => {});
+  assert.deepEqual(p.viagens, []);
+
+  p.api.cfg.pausada = false;
+  await p.api.conferir(() => {});
+  assert.deepEqual(p.viagens, ['Persian']);
+  assert.match(fonte, /▶ Retomar/);
+  assert.match(fonte, /⏸ Pausar/);
+});
+
+test('pool monta o primeiro time escolhido e passa ao seguinte quando todos chegam ao cap', async () => {
+  const p = montar({
+    automatico: true,
+    pool: ['bebes', 'segundo'],
+    teto: 30,
+    equipe: [{ nome: 'ForaDaPool', nivel: 1 }],
+    timesGuardados: {
+      bebes: [{ nome: 'Bulbasaur', nivel: 30 }],
+      segundo: [{ nome: 'Squirtle', nivel: 10 }],
+    },
+    tipos: { Bulbasaur: ['GRASS'], Squirtle: ['WATER'] },
+    degraus: [{ nivel: 1, nivelHunt: 5, cacada: '' }],
+    catalogo: [{ nome: 'Geodude', nivel: 5, tipos: ['ROCK'], trancada: false }],
+  });
+  await p.pronto();
+  await p.api.conferir(() => {});
+  await p.api.conferir(() => {});
+
+  assert.deepEqual(p.timesMontados, ['bebes', 'segundo']);
+  assert.equal(p.lider(), 'Squirtle');
+});
 
 const ESCADA = [
   { nivel: 1, cacada: 'Meowth' },
@@ -979,7 +1110,7 @@ test('o compacto nao esconde a formatura sem a dizer', () => {
   // estava a olhar. Uma regra que age tem de estar a' vista.
   assert.match(fonte, /\.esx\.compacto \.esx-formabox\{display:none\}/);
   assert.match(fonte, /\.esx\.compacto \.esx-resumo\{display:block\}/);
-  assert.match(fonte, /Formatura: Lv \$\{cfg\.teto\}/, 'o resumo diz o teto que esta a valer');
+  assert.match(fonte, /cap Lv \$\{cfg\.teto\}/, 'o resumo diz o teto que esta a valer');
 });
 
 

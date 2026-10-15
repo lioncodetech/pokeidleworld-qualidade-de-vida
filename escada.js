@@ -43,6 +43,8 @@ PPX.modulo(
       // A escada esta' a correr. E' o botao Iniciar/Parar, e manda em tudo: parada, ela nao
       // forma ninguem nem olha para degrau nenhum.
       ligada: false,
+      // Pausar nao e' parar: preserva aluno, degrau aplicado e andamento da pool.
+      pausada: false,
       // Licenca para MUDAR DE CAÇADA sozinha. E' uma pergunta diferente de `ligada`: a escada
       // pode estar a correr — a formar o aluno, a dizer em que degrau ele deveria estar — sem
       // ter licenca para o arrastar para outro mapa. Nasce dada, que e' o que ela sempre fez,
@@ -62,6 +64,13 @@ PPX.modulo(
       // De quem e' esta escada. O degrau cumprido e' a historia de UM aluno: trocar de pokemon
       // recomeça a contagem, e enquanto o aluno e' o mesmo a escada nunca desce.
       aluno: '',
+      // No modo automatico o degrau guarda o nivel da hunt, e nao um nome fixo. A escolha e'
+      // refeita para cada aluno conforme o tipo dele.
+      automatico: false,
+      // Times marcados formam uma fila maior do que os seis lugares da equipe.
+      pool: [],
+      timeAtivo: '',
+      timesConcluidos: [],
       pos: null,
       compacto: false,
     };
@@ -73,6 +82,8 @@ PPX.modulo(
       /* fica o padrao: escada vazia e desligada */
     }
     if (!Array.isArray(cfg.degraus)) cfg.degraus = [];
+    if (!Array.isArray(cfg.pool)) cfg.pool = [];
+    if (!Array.isArray(cfg.timesConcluidos)) cfg.timesConcluidos = [];
     const gravar = () => {
       try {
         localStorage.setItem(CHAVE, JSON.stringify(cfg));
@@ -140,7 +151,58 @@ PPX.modulo(
         nivel: numero(el.querySelector('.phud-lv')?.textContent),
         ativo: el.classList?.contains?.('active') === true,
         espera: esperaDaCaixa(el),
+        tipos: [...el.querySelectorAll?.('img[alt]') || []]
+          .map((img) => String(img.alt || '').toUpperCase())
+          .filter((t) => TIPOS.has(t)),
       }));
+
+    const TIPOS = new Set([
+      'NORMAL', 'FIRE', 'WATER', 'ELECTRIC', 'GRASS', 'ICE', 'FIGHTING', 'POISON',
+      'GROUND', 'FLYING', 'PSYCHIC', 'BUG', 'ROCK', 'GHOST', 'DRAGON', 'DARK', 'STEEL', 'FAIRY',
+    ]);
+    const FORTE = {
+      FIRE: ['GRASS', 'ICE', 'BUG', 'STEEL'], WATER: ['FIRE', 'GROUND', 'ROCK'],
+      ELECTRIC: ['WATER', 'FLYING'], GRASS: ['WATER', 'GROUND', 'ROCK'],
+      ICE: ['GRASS', 'GROUND', 'FLYING', 'DRAGON'], FIGHTING: ['NORMAL', 'ICE', 'ROCK', 'DARK', 'STEEL'],
+      POISON: ['GRASS', 'FAIRY'], GROUND: ['FIRE', 'ELECTRIC', 'POISON', 'ROCK', 'STEEL'],
+      FLYING: ['GRASS', 'FIGHTING', 'BUG'], PSYCHIC: ['FIGHTING', 'POISON'],
+      BUG: ['GRASS', 'PSYCHIC', 'DARK'], ROCK: ['FIRE', 'ICE', 'FLYING', 'BUG'],
+      GHOST: ['PSYCHIC', 'GHOST'], DRAGON: ['DRAGON'], DARK: ['PSYCHIC', 'GHOST'],
+      STEEL: ['ICE', 'ROCK', 'FAIRY'], FAIRY: ['FIGHTING', 'DRAGON', 'DARK'],
+    };
+    const FRACO = {
+      NORMAL: ['ROCK', 'STEEL'], FIRE: ['FIRE', 'WATER', 'ROCK', 'DRAGON'],
+      WATER: ['WATER', 'GRASS', 'DRAGON'], ELECTRIC: ['ELECTRIC', 'GRASS', 'DRAGON'],
+      GRASS: ['FIRE', 'GRASS', 'POISON', 'FLYING', 'BUG', 'DRAGON', 'STEEL'],
+      ICE: ['FIRE', 'WATER', 'ICE', 'STEEL'], FIGHTING: ['POISON', 'FLYING', 'PSYCHIC', 'BUG', 'FAIRY'],
+      POISON: ['POISON', 'GROUND', 'ROCK', 'GHOST'], GROUND: ['GRASS', 'BUG'],
+      FLYING: ['ELECTRIC', 'ROCK', 'STEEL'], PSYCHIC: ['PSYCHIC', 'STEEL'],
+      BUG: ['FIRE', 'FIGHTING', 'POISON', 'FLYING', 'GHOST', 'STEEL', 'FAIRY'],
+      ROCK: ['FIGHTING', 'GROUND', 'STEEL'], GHOST: ['DARK'], DRAGON: ['STEEL'],
+      DARK: ['FIGHTING', 'DARK', 'FAIRY'], STEEL: ['FIRE', 'WATER', 'ELECTRIC', 'STEEL'],
+      FAIRY: ['FIRE', 'POISON', 'STEEL'],
+    };
+    const IMUNE = { NORMAL: ['GHOST'], ELECTRIC: ['GROUND'], FIGHTING: ['GHOST'], POISON: ['STEEL'], GROUND: ['FLYING'], PSYCHIC: ['DARK'], GHOST: ['NORMAL'], DRAGON: ['FAIRY'] };
+    const multiplicador = (ataque, defesas) => defesas.reduce((m, defesa) =>
+      m * (IMUNE[ataque]?.includes(defesa) ? 0 : FORTE[ataque]?.includes(defesa) ? 2 : FRACO[ataque]?.includes(defesa) ? 0.5 : 1), 1);
+    const escolherHunt = (degrau, tipos) => {
+      const nivel = Number(degrau?.nivelHunt || 0);
+      if (!nivel || !tipos?.length) return null;
+      const doNivel = (globalThis.PPX?.cacadas?.todas?.() || [])
+        .filter((h) => h.nivel === nivel && !h.trancada && h.tipos?.length)
+        .map((h) => ({
+          ...h,
+          vantagem: Math.max(...tipos.map((t) => multiplicador(t, h.tipos))),
+          perigo: Math.max(...h.tipos.map((t) => multiplicador(t, tipos))),
+        }));
+      const candidatas = doNivel
+        .filter((h) => h.vantagem >= 1 && h.perigo <= 1)
+        .sort((a, b) => b.vantagem - a.vantagem || a.nome.localeCompare(b.nome));
+      if (candidatas[0]) return candidatas[0];
+      if (doNivel.length && doNivel.every((h) => h.perigo > 1))
+        return { nome: '', semSegura: true, nivel };
+      return null;
+    };
 
     /** Formado = chegou ao teto. Sem teto ninguem se forma, e a escada e' a de sempre. */
     const formado = (p) => Boolean(cfg.teto) && p.nivel !== null && p.nivel >= cfg.teto;
@@ -192,6 +254,12 @@ PPX.modulo(
     const primeiroDegrau = () =>
       cfg.degraus.reduce((m, d) => (!m || d.nivel < m.nivel ? d : m), null);
 
+    const alvoDoDegrau = (degrau) => {
+      if (!degrau) return null;
+      if (!cfg.automatico) return degrau.cacada ? { nome: degrau.cacada, vantagem: null } : null;
+      return escolherHunt(degrau, equipe().find((p) => p.ativo)?.tipos || equipe()[0]?.tipos || []);
+    };
+
     /**
      * Uma frase que explica a decisao de agora — mesmo quando a decisao e' nao fazer nada.
      *
@@ -202,6 +270,7 @@ PPX.modulo(
      */
     function diagnostico() {
       if (!cfg.ligada) return 'Parada. Não faço nada sozinha — mas o "Ir agora" funciona.';
+      if (cfg.pausada) return 'Pausada. Retome para continuar exatamente do mesmo ponto.';
       if (!cfg.degraus.length) return 'Sem degraus. Um degrau é "a partir do nível N, caçar aqui".';
 
       const n = nivelLider();
@@ -236,18 +305,24 @@ PPX.modulo(
           'Ponha um degrau em Lv 1 para começar já.'
         );
       }
-      if (!degrau.cacada) return `Lv ${n}: o degrau de Lv ${degrau.nivel} não tem caçada escolhida.`;
-      if (local() === degrau.cacada) return `${quem} Lv ${n}: em "${degrau.cacada}", como manda o degrau de Lv ${degrau.nivel}.`;
+      const alvo = alvoDoDegrau(degrau);
+      if (alvo?.semSegura)
+        return `${quem} Lv ${n}: todas as hunts Lv ${alvo.nivel} têm vantagem contra ele. Fico em "${local() || 'onde está'}" até o próximo marco.`;
+      if (!alvo)
+        return cfg.automatico
+          ? `Lv ${n}: não achei hunt Lv ${degrau.nivelHunt || '?'} neutra ou vantajosa para ${quem}.`
+          : `Lv ${n}: o degrau de Lv ${degrau.nivel} não tem caçada escolhida.`;
+      if (local() === alvo.nome) return `${quem} Lv ${n}: em "${alvo.nome}", como manda o degrau de Lv ${degrau.nivel}.`;
       if (cfg.aplicado !== null && degrau.nivel < cfg.aplicado)
         return (
           `${quem} Lv ${n}: o degrau de Lv ${degrau.nivel} está abaixo do de Lv ${cfg.aplicado}, ` +
           'que já cumpri com ele. Não desço com o mesmo aluno.'
         );
       if (degrau.nivel === cfg.aplicado)
-        return `${quem} Lv ${n}: degrau de Lv ${degrau.nivel} já cumprido. Você saiu de "${degrau.cacada}" — fique à vontade.`;
+        return `${quem} Lv ${n}: degrau de Lv ${degrau.nivel} já cumprido. Você saiu de "${alvo.nome}" — fique à vontade.`;
       if (cfg.trocar !== true)
-        return `${quem} Lv ${n}: iria para "${degrau.cacada}", mas não tenho licença para trocar de caçada. Use o ▸.`;
-      return `${quem} Lv ${n}: falta ir para "${degrau.cacada}".`;
+        return `${quem} Lv ${n}: iria para "${alvo.nome}", mas não tenho licença para trocar de caçada. Use o ▸.`;
+      return `${quem} Lv ${n}: falta ir para "${alvo.nome}"${alvo.vantagem > 1 ? ' (vantagem de tipo)' : ' (dano neutro)'}.`;
     }
 
     // --------------------------------------------------------------- o motor
@@ -381,6 +456,34 @@ PPX.modulo(
       return erro ? erro.diga : '';
     }
 
+    async function montarTimeDaPool(nome, aviso) {
+      const times = globalThis.PPX?.times;
+      if (!times?.usar) {
+        aviso('A ferramenta Times nao esta ligada — ligue-a no menu (Alt+Q).');
+        return 'sem times';
+      }
+      if (Date.now() < esperaAte) return 'esperando';
+      correndo = true;
+      try {
+        aviso(`Pool: montando o time "${nome}".`);
+        const posto = await times.usar(nome, { aviso, voltar: false });
+        if (!posto.ok) {
+          esperaAte = Date.now() + CASTIGO;
+          aviso(`Não montei o time "${nome}": ${posto.erro}`);
+          return 'falhou';
+        }
+        cfg.timeAtivo = nome;
+        cfg.aplicado = null;
+        cfg.aluno = '';
+        cfg.formados = false;
+        gravar();
+        aviso(`Pool: time "${nome}" pronto. Vou escolher o primeiro Pokémon abaixo do cap.`);
+        return 'novo time';
+      } finally {
+        correndo = false;
+      }
+    }
+
     /**
      * A parte da formatura: trocar de aluno quando o da frente chega ao teto, e parar quando nao
      * houver mais aluno nenhum.
@@ -389,11 +492,23 @@ PPX.modulo(
      * passo ja' resolveu a vez de agora.
      */
     async function formatura(aviso) {
+      if (cfg.automatico && cfg.pool.length && !cfg.timeAtivo) {
+        const primeiro = cfg.pool.find((nome) => !cfg.timesConcluidos.includes(nome));
+        if (primeiro) return montarTimeDaPool(primeiro, aviso);
+      }
       const time = equipe();
       if (!time.length) return '';
       const aluno = proximoAluno();
 
       if (!aluno) {
+        if (cfg.automatico && cfg.pool.length) {
+          if (cfg.timeAtivo && !cfg.timesConcluidos.includes(cfg.timeAtivo)) {
+            cfg.timesConcluidos.push(cfg.timeAtivo);
+            gravar();
+          }
+          const proximo = cfg.pool.find((nome) => !cfg.timesConcluidos.includes(nome));
+          if (proximo) return montarTimeDaPool(proximo, aviso);
+        }
         // Toda a equipe passou do teto. A caçada acaba aqui.
         if (!cfg.destino) {
           aviso(diagnostico());
@@ -476,7 +591,7 @@ PPX.modulo(
      * for preciso e confere a chegada. Esta ferramenta so' decide **quando**.
      */
     async function conferir(aviso = diz) {
-      if (!cfg.ligada || correndo) return '';
+      if (!cfg.ligada || cfg.pausada || correndo) return '';
       // Aba oculta: o motor do jogo para, as placas dos NPC somem e a cura fica fora de alcance.
       // O nivel tambem nao sobe, entao nao ha' o que perder em esperar a aba voltar.
       if (document.visibilityState !== 'visible') return '';
@@ -510,6 +625,15 @@ PPX.modulo(
       }
 
       const degrau = degrauPara(n);
+      const alvo = alvoDoDegrau(degrau);
+      if (degrau && alvo?.semSegura && degrau.nivel !== cfg.aplicado) {
+        // Este marco foi avaliado e recusado por seguranca. Marca-lo impede uma tentativa a cada
+        // nivel ganho; quando chegar ao proximo degrau, o numero muda e a escolha e' refeita.
+        cfg.aplicado = degrau.nivel;
+        gravar();
+        aviso(diagnostico());
+        return 'sem hunt segura';
+      }
       // E ela nunca desce com o mesmo aluno. Um degrau ABAIXO do que ja' foi cumprido com ESTE
       // aluno nao e' progresso: e' um nivel mal lido, um degrau editado, ou o jogo a por outra
       // caixa como `active` — e o castigo e' arrastar um Lv 19 para a caçada dos Lv 1. Guarda-se
@@ -521,13 +645,13 @@ PPX.modulo(
       // Nao agir e' uma decisao como outra qualquer, e tem de ser dita. Ficar parada em silencio
       // e' indistinguivel de estar quebrada — foi o que aconteceu com o lider no Lv 1 e o
       // primeiro degrau no Lv 5.
-      if (!degrau || !degrau.cacada || degrau.nivel === cfg.aplicado) {
+      if (!degrau || !alvo || degrau.nivel === cfg.aplicado) {
         aviso(diagnostico());
         return 'nada a fazer';
       }
 
       // Ja' estar la' conta como feito: e' o caso de quem liga a escada ja' na caçada certa.
-      if (local() === degrau.cacada) {
+      if (local() === alvo.nome) {
         cfg.aplicado = degrau.nivel;
         gravar();
         aviso(diagnostico());
@@ -551,15 +675,15 @@ PPX.modulo(
 
       correndo = true;
       try {
-        aviso(`Lv ${n}: indo para "${degrau.cacada}".`);
+        aviso(`Lv ${n}: indo para "${alvo.nome}"${alvo.vantagem > 1 ? ' com vantagem de tipo' : ''}.`);
         // `cfg.time` ausente devolve `undefined`, que e' exatamente "use o time da caçada".
         // Os tres estados cabem num campo so': ausente, '' (nao trocar) e um nome.
-        const msg = await cacadas.ir(degrau.cacada, aviso, { time: cfg.time });
-        if (local() === degrau.cacada) {
+        const msg = await cacadas.ir(alvo.nome, aviso, { time: cfg.automatico ? '' : cfg.time });
+        if (local() === alvo.nome) {
           cfg.aplicado = degrau.nivel;
           gravar();
           const recado = await reporAFrente(aviso);
-          aviso(recado || `Degrau ${degrau.nivel}: em "${degrau.cacada}".`);
+          aviso(recado || `Degrau ${degrau.nivel}: em "${alvo.nome}".`);
           return 'ok';
         }
         // Nao marcar o degrau como feito e' de proposito: a tentativa volta a valer. O castigo
@@ -622,6 +746,8 @@ PPX.modulo(
       '.esx-l select{flex:1;min-width:0;background:#0b0e14;color:#e6e9ef;',
       'border:1px solid #3a4152;border-radius:5px;padding:3px 5px;',
       'font:11.5px system-ui,sans-serif}',
+      '.esx-l input.esx-cacada{flex:1;min-width:0;width:auto;background:#0b0e14;color:#e6e9ef;',
+      'border:1px solid #3a4152;border-radius:5px;padding:3px 5px;font:11.5px system-ui,sans-serif}',
       '.esx-l button{width:auto!important;margin:0!important;padding:3px 8px!important;',
       'font-size:12px!important}',
       '.esx-lv{font-size:11.5px;opacity:.75;flex:0 0 auto}',
@@ -651,8 +777,11 @@ PPX.modulo(
       '.esx-resumo{display:none;font-size:11.5px;opacity:.8;margin:7px 0 0;line-height:1.3}',
       '.esx.compacto .esx-resumo{display:block}',
       '.esx.compacto .esx-formabox{display:none}',
-      '.esx.compacto .esx-novo,.esx.compacto .esx-status,.esx.compacto .esx-l .esx-fora,',
-      '.esx.compacto .esx-time,.esx.compacto .esx-vazio{display:none}',
+      '.esx-auto,.esx-pool{font-size:11px;margin:6px 0;line-height:1.35}',
+      '.esx-pool label{display:block;margin:3px 0}',
+      '.esx.compacto .esx-lista,.esx.compacto .esx-timebox,.esx.compacto .esx-novo,',
+      '.esx.compacto .esx-status,.esx.compacto .esx-liga,.esx.compacto .esx-auto,',
+      '.esx.compacto .esx-l .esx-fora,.esx.compacto .esx-time,.esx.compacto .esx-vazio{display:none}',
       '.esx.compacto .esx-l{margin:2px 0}',
     ].join('');
 
@@ -673,34 +802,59 @@ PPX.modulo(
      * que saiu daquela lista **nao desaparece em silencio**: fica aqui, marcada, para voce ver
      * que ela sumiu em vez de descobrir quando o degrau nao disparar.
      */
-    function seletorDeCacada(degrau) {
-      const nomes = (globalThis.PPX?.cacadas?.cfg?.lista || []).map((c) => c.nome);
-      const sel = document.createElement('select');
-      sel.className = 'esx-cacada';
+    const cacadasConhecidas = () => {
+      const todas = globalThis.PPX?.cacadas?.todas?.();
+      if (Array.isArray(todas) && todas.length) return todas;
+      return (globalThis.PPX?.cacadas?.cfg?.lista || []).map((c) => ({
+        nome: c.nome,
+        nivel: 0,
+        regiao: '',
+        trancada: false,
+      }));
+    };
 
-      const nenhum = document.createElement('option');
-      nenhum.value = '';
-      nenhum.textContent = nomes.length ? '— escolha a caçada —' : '— Caçadas desligada —';
-      sel.append(nenhum);
+    let nomesSabidos = new Set();
+    let digitalDaLista = '';
+    let listaCacadas = null;
 
-      for (const nome of nomes) {
+    function encherDatalista() {
+      const todas = cacadasConhecidas();
+      const digital = `${todas.length}|${todas[0]?.nome || ''}|${todas.at(-1)?.nome || ''}`;
+      nomesSabidos = new Set(todas.map((c) => c.nome));
+      if (digital === digitalDaLista) return;
+      digitalDaLista = digital;
+      const lista = listaCacadas;
+      if (!lista) return;
+      lista.textContent = '';
+      for (const c of todas) {
         const o = document.createElement('option');
-        o.value = nome;
-        o.textContent = nome;
-        sel.append(o);
+        o.value = c.nome;
+        o.label = [c.nivel ? `Lv ${c.nivel}` : '', c.regiao, c.trancada ? 'trancada' : '']
+          .filter(Boolean)
+          .join(' · ');
+        lista.appendChild(o);
       }
-      if (degrau.cacada && !nomes.includes(degrau.cacada)) {
-        const perdida = document.createElement('option');
-        perdida.value = degrau.cacada;
-        perdida.textContent = `${degrau.cacada} (não está guardada)`;
-        sel.append(perdida);
-      }
+    }
 
+    function seletorDeCacada(degrau) {
+      encherDatalista();
+      const sel = document.createElement('input');
+      sel.type = 'search';
+      sel.className = 'esx-cacada';
+      sel.placeholder = 'buscar hunt…';
+      sel.setAttribute?.('list', 'esx-cacadas-do-jogo');
       sel.value = degrau.cacada || '';
+      sel.addEventListener('focus', encherDatalista);
       sel.addEventListener('change', () => {
-        degrau.cacada = sel.value;
+        const nome = sel.value.trim();
+        if (nome && nomesSabidos.size && !nomesSabidos.has(nome)) {
+          diz(`"${nome}" não está na lista de caçadas do jogo.`);
+          sel.value = degrau.cacada || '';
+          return;
+        }
+        degrau.cacada = nome;
         gravar();
-        diz(sel.value ? `Lv ${degrau.nivel} → "${sel.value}".` : `Lv ${degrau.nivel} sem caçada.`);
+        diz(nome ? `Lv ${degrau.nivel} → "${nome}".` : `Lv ${degrau.nivel} sem caçada.`);
       });
       return sel;
     }
@@ -754,6 +908,37 @@ PPX.modulo(
         );
       });
       return sel;
+    }
+
+    function seletorDaPool() {
+      const caixa = document.createElement('div');
+      caixa.className = 'esx-pool';
+      const nomes = globalThis.PPX?.times?.nomes?.() || [];
+      const titulo = document.createElement('b');
+      titulo.textContent = 'Times da pool para upar:';
+      caixa.appendChild(titulo);
+      if (!nomes.length) {
+        const vazio = document.createElement('div');
+        vazio.textContent = 'Guarde os times no painel Times primeiro.';
+        caixa.appendChild(vazio);
+      }
+      for (const nome of nomes) {
+        const linha = document.createElement('label');
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = cfg.pool.includes(nome);
+        check.addEventListener('change', () => {
+          cfg.pool = check.checked ? [...new Set([...cfg.pool, nome])] : cfg.pool.filter((n) => n !== nome);
+          cfg.timesConcluidos = cfg.timesConcluidos.filter((n) => cfg.pool.includes(n));
+          if (!cfg.pool.includes(cfg.timeAtivo)) cfg.timeAtivo = '';
+          gravar();
+        });
+        const texto = document.createElement('span');
+        texto.textContent = ` ${nome}`;
+        linha.append(check, texto);
+        caixa.appendChild(linha);
+      }
+      return caixa;
     }
 
     /**
@@ -922,17 +1107,25 @@ PPX.modulo(
     function pintarResumo() {
       const linha = painel?.querySelector('.esx-resumo');
       if (!linha) return;
-      linha.textContent = cfg.teto
-          ? `Formatura: Lv ${cfg.teto}` +
-            (cfg.destino ? ` · depois para em "${cfg.destino}"` : ' · depois fico onde estiver')
-          : '';
+      const estado = !cfg.ligada ? 'Parada' : cfg.pausada ? 'Pausada' : 'Rodando';
+      const lider = nomeLider();
+      const nivel = nivelLider();
+      linha.textContent = [
+        estado,
+        lider && nivel !== null ? `${lider} Lv ${nivel}` : '',
+        local() ? `em "${local()}"` : '',
+        cfg.teto ? `cap Lv ${cfg.teto}` : '',
+        cfg.automatico && cfg.pool.length
+          ? `pool ${cfg.timesConcluidos.length}/${cfg.pool.length}`
+          : '',
+      ].filter(Boolean).join(' · ');
     }
 
     function pintarLista() {
       const caixa = painel?.querySelector('.esx-timebox');
       if (caixa) {
         caixa.textContent = '';
-        caixa.appendChild(seletorDeTime());
+        caixa.appendChild(cfg.automatico ? seletorDaPool() : seletorDeTime());
       }
       const lista = painel?.querySelector('.esx-lista');
       if (!lista) return;
@@ -986,7 +1179,24 @@ PPX.modulo(
           diz('Degrau tirado.');
         });
 
-        l.append(rotulo, nivel, seletorDeCacada(degrau), vai, fora);
+        if (cfg.automatico) {
+          const alvo = document.createElement('span');
+          alvo.className = 'esx-lv';
+          alvo.textContent = '→ hunt Lv';
+          const nivelHunt = document.createElement('input');
+          nivelHunt.type = 'number';
+          nivelHunt.min = '1';
+          nivelHunt.value = degrau.nivelHunt ? String(degrau.nivelHunt) : '';
+          nivelHunt.placeholder = 'nível';
+          nivelHunt.title = 'Nível exato das hunts entre as quais a ferramenta deve escolher';
+          nivelHunt.addEventListener('change', () => {
+            degrau.nivelHunt = Math.max(1, Math.round(Number(nivelHunt.value) || 1));
+            cfg.aplicado = null;
+            gravar();
+            diz(diagnostico());
+          });
+          l.append(rotulo, nivel, alvo, nivelHunt, fora);
+        } else l.append(rotulo, nivel, seletorDeCacada(degrau), vai, fora);
         lista.appendChild(l);
       }
     }
@@ -1001,6 +1211,10 @@ PPX.modulo(
       painel = document.createElement('div');
       painel.className = 'esx';
 
+      listaCacadas = document.createElement('datalist');
+      listaCacadas.id = 'esx-cacadas-do-jogo';
+      painel.appendChild(listaCacadas);
+
       const barra = document.createElement('div');
       barra.className = 'esx-barra';
       const titulo = document.createElement('h4');
@@ -1013,6 +1227,7 @@ PPX.modulo(
         cfg.compacto = !cfg.compacto;
         gravar();
         aplicarModo();
+        pintarResumo();
       });
       const fechar = document.createElement('button');
       fechar.className = 'esx-x';
@@ -1036,7 +1251,7 @@ PPX.modulo(
       novo.className = 'esx-novo';
       novo.textContent = '＋ Novo degrau';
       novo.addEventListener('click', () => {
-        cfg.degraus.push({ nivel: nivelDoProximo(), cacada: '' });
+        cfg.degraus.push({ nivel: nivelDoProximo(), cacada: '', nivelHunt: 1 });
         ordenar();
         gravar();
         pintarLista();
@@ -1077,6 +1292,28 @@ PPX.modulo(
       });
       painel.appendChild(ir);
 
+      const pausa = document.createElement('button');
+      pausa.className = 'esx-pausa';
+      const pintarPausa = () => {
+        pausa.textContent = cfg.pausada ? '▶ Retomar' : '⏸ Pausar';
+        pausa.title = cfg.pausada
+          ? 'Continuar do mesmo aluno, degrau e time da pool'
+          : 'Congelar a escada sem perder o andamento';
+      };
+      pausa.addEventListener('click', () => {
+        cfg.pausada = !cfg.pausada;
+        gravar();
+        pintarPausa();
+        pintarResumo();
+        if (cfg.pausada) diz('Pausada. Guardei o ponto exato da escada e da pool.');
+        else {
+          diz('Retomada. Continuando do mesmo ponto.');
+          conferir();
+        }
+      });
+      pintarPausa();
+      painel.appendChild(pausa);
+
       const liga = document.createElement('label');
       liga.className = 'esx-liga';
       const caixa = document.createElement('input');
@@ -1095,6 +1332,26 @@ PPX.modulo(
       texto.textContent = 'trocar de caçada sozinha';
       liga.append(caixa, texto);
       painel.appendChild(liga);
+
+      const modoAuto = document.createElement('label');
+      modoAuto.className = 'esx-auto';
+      const auto = document.createElement('input');
+      auto.type = 'checkbox';
+      auto.checked = cfg.automatico === true;
+      auto.addEventListener('change', () => {
+        cfg.automatico = auto.checked;
+        cfg.aplicado = null;
+        cfg.formados = false;
+        cfg.timesConcluidos = [];
+        if (!cfg.automatico) cfg.timeAtivo = '';
+        gravar();
+        pintarLista();
+        diz(cfg.automatico ? 'Modo automático: escolho a hunt pelo tipo do líder.' : 'Modo manual: cada degrau usa a hunt escolhida.');
+      });
+      const autoTxt = document.createElement('span');
+      autoTxt.textContent = ' escolher hunt automaticamente pelo tipo';
+      modoAuto.append(auto, autoTxt);
+      painel.appendChild(modoAuto);
 
       const status = document.createElement('div');
       status.className = 'esx-status';

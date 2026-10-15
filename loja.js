@@ -18,6 +18,12 @@ PPX.modulo(
 
     // O que nunca se vende. Nao e' configuravel de proposito: a lista existe para ser chata.
     const PROTEGIDAS = ['Lendária', 'Mítica', 'Anciã', 'Divina'];
+    const ITENS_PROTEGIDOS = [
+      /^Poke Card Pack$/i, /^Bronze Dimensional Key$/i, /^Devoted Token$/i,
+      /^Strange Pheromone$/i, /^Shiny .+ Card$/i, /^Rare Pokemon Picture$/i,
+      /^Bronze Boss Token$/i,
+      /^Legendary Golden Ticket$/i,
+    ];
 
     // Pausa entre cliques de compra. O jogo debita no mesmo tick, mas martelar um botao de
     // compra sem respiro e' pedir para o servidor achar que e' ataque.
@@ -133,6 +139,42 @@ PPX.modulo(
       }
     }
 
+    /** Aciona o hover que cria o tooltip com a quantidade inteira dos slots `9999+`. */
+    async function revelarQuantidadesExatas() {
+      const truncados = [...document.querySelectorAll('.inv-slot')].filter((slot) =>
+        /\+/.test(slot.querySelector('.inv-qty')?.textContent || ''),
+      );
+      for (const slot of truncados) {
+        const textos = [];
+        const olho = typeof MutationObserver === 'undefined' ? null : new MutationObserver((lotes) => {
+          for (const lote of lotes) {
+            if (lote.target?.textContent) textos.push(lote.target.textContent);
+            for (const no of lote.addedNodes || []) if (no?.textContent) textos.push(no.textContent);
+          }
+        });
+        olho?.observe(document.body, { childList: true, subtree: true, characterData: true });
+        try {
+          const r = slot.getBoundingClientRect();
+          const opts = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+          for (const tipo of ['pointerover', 'mouseover', 'mouseenter', 'mousemove'])
+            slot.dispatchEvent(new MouseEvent(tipo, opts));
+          await esperar(350);
+          for (const el of document.querySelectorAll(
+            '[role="tooltip"],[class*="tooltip"],[class*="Tooltip"],[class*="item-tip"]',
+          )) if (el.textContent) textos.push(el.textContent);
+        } catch (e) {
+          // Sem evento de mouse, conserva o seguro `9999+` desconhecido.
+        } finally {
+          olho?.disconnect();
+        }
+        const numeros = textos
+          .flatMap((t) => String(t).match(/\d[\d.,]*/g) || [])
+          .map((t) => parseInt(t.replace(/\D/g, ''), 10))
+          .filter((n) => Number.isFinite(n) && n >= 10000);
+        if (numeros.length) slot.dataset.ppxQuantidadeExata = String(Math.max(...numeros));
+      }
+    }
+
     /**
      * Quanto ha' de cada item da lista, lido de uma vez so'.
      *
@@ -151,12 +193,30 @@ PPX.modulo(
           conta[nome] = 0;
           continue;
         }
-        const txt = (slot.querySelector('.inv-qty')?.textContent || '1').trim();
-        if (/\+/.test(txt)) {
+        const qty = slot.querySelector('.inv-qty');
+        const txt = (qty?.textContent || '1').trim();
+        // Acima de 9999 o texto e' truncado, mas o jogo guarda o numero inteiro no tooltip que
+        // aparece ao passar o mouse. Leem-se os mesmos atributos que alimentam esse tooltip;
+        // nao e' preciso mover o ponteiro nem deixar a automacao dependente de uma animacao.
+        const dica = [
+          qty?.title,
+          qty?.getAttribute?.('aria-label'),
+          qty?.getAttribute?.('data-tooltip'),
+          qty?.dataset?.tooltip,
+          qty?.dataset?.quantity,
+          slot.title,
+          slot.getAttribute?.('aria-label'),
+          slot.getAttribute?.('data-tooltip'),
+          slot.dataset?.tooltip,
+          slot.dataset?.quantity,
+          slot.dataset?.ppxQuantidadeExata,
+        ].find((v) => /\d[\d.,]*/.test(String(v || '')) && !/9999\+/.test(String(v || '')));
+        const fonte = /\+/.test(txt) ? dica : txt;
+        if (!fonte) {
           conta[nome] = Infinity;
           continue;
         }
-        const v = parseInt(txt.replace(/\D/g, ''), 10);
+        const v = parseInt(String(fonte).replace(/\D/g, ''), 10);
         conta[nome] = Number.isFinite(v) ? v : null;
       }
       return conta;
@@ -182,6 +242,7 @@ PPX.modulo(
         if (!soltar) return 'Nao consegui a vez na fila; nao abri a mochila.';
         aviso('Abrindo o inventário…');
         if (!(await abrirInventario())) return 'Nao achei o inventário.';
+        await revelarQuantidadesExatas();
         const conta = lerInventario();
         await fecharInventario();
         if (!conta) return 'Nao consegui ler o inventário.';
@@ -235,6 +296,7 @@ PPX.modulo(
       aviso('Abrindo o inventário para ver o que já tenho…');
       if (!(await abrirInventario()))
         return { relato: ['Nao achei o inventário. Nao comprei nada.'], comprados: {} };
+      await revelarQuantidadesExatas();
       const antes = lerInventario();
       await fecharInventario();
       if (!antes) return { relato: ['Nao consegui ler o inventário. Nao comprei nada.'], comprados: {} };
@@ -268,6 +330,7 @@ PPX.modulo(
         relato.push('Nao consegui reabrir o inventário para conferir.');
         return { relato, comprados };
       }
+      await revelarQuantidadesExatas();
       const depois = lerInventario();
       await fecharInventario();
       if (depois) pintarEstoque(depois);
@@ -430,27 +493,31 @@ PPX.modulo(
      * marcado, tenha o filtro funcionado ou nao. E se a conta do jogo nao bater com a do DOM,
      * alguem esta' vendo uma lista que o outro nao ve — e ai nao se vende nada.
      */
-    function auditar() {
+    function auditar(aba = 'Pokémon') {
       const linhas = marcadas();
-      const proibidos = linhas.filter((r) => grade(r));
+      const proibidos = linhas.filter((r) =>
+        aba === 'Pokémon'
+          ? grade(r)
+          : ITENS_PROTEGIDOS.some((re) => re.test((r.querySelector('.mks-name')?.textContent || '').trim())),
+      );
       const doJogo = contagemDoJogo();
       return {
         total: linhas.length,
         doJogo,
         proibidos: proibidos.map((r) => ({
           nome: (r.querySelector('.mks-name')?.textContent || '?').trim(),
-          grade: grade(r),
+          grade: aba === 'Pokémon' ? grade(r) : 'item protegido',
           linha: r,
         })),
         divergente: doJogo !== null && doJogo !== linhas.length,
       };
     }
 
-    async function prepararVenda(aviso) {
-      if (!(await abrirAba('Pokémon'))) return { ok: false, motivo: 'loja fechada' };
+    async function prepararVenda(aviso, aba = 'Pokémon') {
+      if (!(await abrirAba(aba))) return { ok: false, motivo: `aba ${aba} indisponível` };
 
       // 1. desliga as grades protegidas, e confere que desligaram mesmo
-      for (const nome of PROTEGIDAS) {
+      for (const nome of aba === 'Pokémon' ? PROTEGIDAS : []) {
         const b = [...janela().querySelectorAll('.mks-fgrade')].find(
           (x) => x.textContent.trim() === nome,
         );
@@ -460,11 +527,11 @@ PPX.modulo(
         }
       }
       await esperar(600);
-      const teimosas = [...janela().querySelectorAll('.mks-fgrade')]
+      const teimosas = aba === 'Pokémon' ? [...janela().querySelectorAll('.mks-fgrade')]
         .filter(
           (b) => PROTEGIDAS.includes(b.textContent.trim()) && String(b.className).includes('on'),
         )
-        .map((b) => b.textContent.trim());
+        .map((b) => b.textContent.trim()) : [];
       if (teimosas.length)
         return { ok: false, motivo: `o filtro nao desligou: ${teimosas.join(', ')}` };
 
@@ -478,7 +545,7 @@ PPX.modulo(
       }
 
       // 3. audita o que ficou marcado, e desmarca um a um o que nao devia estar
-      let a = auditar();
+      let a = auditar(aba);
       if (a.proibidos.length) {
         if (aviso) aviso(`${a.proibidos.length} protegidos marcados: desmarcando`);
         for (const p of a.proibidos) {
@@ -486,7 +553,7 @@ PPX.modulo(
           await esperar(220);
         }
         await esperar(700);
-        a = auditar();
+        a = auditar(aba);
       }
 
       if (a.proibidos.length)
@@ -697,9 +764,18 @@ PPX.modulo(
           return;
         }
         diz('Ciclo rodando — acompanhe aqui.');
-        c.rodar(venderAgora, comprar, diz);
+        c.rodar(venderTudo, comprar, diz);
       });
       painel.appendChild(btCiclo);
+
+      const btPararCiclo = document.createElement('button');
+      btPararCiclo.textContent = '⏹ Parar ciclo';
+      btPararCiclo.title = 'Interrompe o ciclo antes da próxima ação';
+      btPararCiclo.addEventListener('click', () => {
+        const c = globalThis.PPX?.ciclo;
+        diz(c?.parar?.() ? 'Parada solicitada.' : 'Nenhum ciclo está rodando.');
+      });
+      painel.appendChild(btPararCiclo);
 
       const sepAg = document.createElement('div');
       sepAg.className = 'ljx-sep';
@@ -760,9 +836,9 @@ PPX.modulo(
      * marcado, e a conta do jogo igual a' da tela. Qualquer uma falhando, nao se vende nada. O
      * teto e' a ultima trava: um numero inesperadamente grande e' sinal de que algo mudou.
      */
-    async function venderAgora(aviso = () => {}) {
+    async function venderAba(aba, aviso = () => {}) {
       if (!janela()) return 'Loja fechada: nao vendi.';
-      const r = await prepararVenda(aviso);
+      const r = await prepararVenda(aviso, aba);
       if (!r.ok) return `Venda parada: ${r.motivo}. Nada foi vendido.`;
 
       const bt = [...janela().querySelectorAll('button')].find((x) =>
@@ -775,7 +851,16 @@ PPX.modulo(
 
       const conf = await confirmar(r.total);
       if (conf.cancelou) return conf.motivo;
-      return `Vendidos: ${rotulo.replace(/^Vender\s*/, '')}`;
+      return `${aba}: Vendidos ${rotulo.replace(/^Vender\s*/, '')}`;
+    }
+
+    const venderAgora = (aviso = () => {}) => venderAba('Pokémon', aviso);
+
+    async function venderTudo(aviso = () => {}) {
+      const pokemon = await venderAba('Pokémon', aviso);
+      aviso(pokemon);
+      const itens = await venderAba('Itens', aviso);
+      return `${pokemon} ${itens}`;
     }
 
     /**
@@ -916,6 +1001,7 @@ PPX.modulo(
       prepararVenda,
       auditar,
       venderAgora,
+      venderTudo,
       cfg,
       ITENS,
     };
@@ -933,6 +1019,7 @@ PPX.modulo(
         prepararVenda,
         auditar,
         venderAgora,
+        venderTudo,
         cfg,
       };
   },

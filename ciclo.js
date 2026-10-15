@@ -168,9 +168,15 @@ PPX.modulo(
         (s) => (s.querySelector('img')?.alt || '').trim() === nome,
       );
       if (!slot) return 0;
-      const txt = (slot.querySelector('.inv-qty')?.textContent || '1').trim();
-      if (/\+/.test(txt)) return Infinity;
-      const v = parseInt(txt.replace(/\D/g, ''), 10);
+      const qty = slot.querySelector('.inv-qty');
+      const txt = (qty?.textContent || '1').trim();
+      const dica = [qty?.title, qty?.getAttribute?.('aria-label'), qty?.dataset?.tooltip,
+        qty?.dataset?.quantity, slot.title, slot.getAttribute?.('aria-label'),
+        slot.dataset?.tooltip, slot.dataset?.quantity]
+        .find((v) => /\d[\d.,]*/.test(String(v || '')) && !/9999\+/.test(String(v || '')));
+      const fonte = /\+/.test(txt) ? dica : txt;
+      if (!fonte) return Infinity;
+      const v = parseInt(String(fonte).replace(/\D/g, ''), 10);
       return Number.isFinite(v) ? v : null;
     }
 
@@ -189,6 +195,7 @@ PPX.modulo(
     // --- o ciclo -------------------------------------------------------------------------------
 
     let rodando = false;
+    let pararPedido = false;
     let contar = null;
     const relato = [];
     const nota = (txt) => {
@@ -202,6 +209,15 @@ PPX.modulo(
       if (!vez?.pedir) return () => {};
       return vez.pedir(MINHA_VEZ);
     };
+
+    function parar() {
+      if (!rodando) return false;
+      pararPedido = true;
+      nota('Parada solicitada — encerrando a etapa atual com segurança.');
+      return true;
+    }
+
+    const interrompido = () => pararPedido;
 
     async function voltarPara(hunt) {
       if (!hunt) return false;
@@ -231,6 +247,7 @@ PPX.modulo(
     async function rodar(vender, comprar, diz) {
       if (rodando) return;
       rodando = true;
+      pararPedido = false;
       contar = diz || null;
       relato.length = 0;
       let soltar = null;
@@ -240,6 +257,7 @@ PPX.modulo(
         soltar = await esperarAVez();
         if (!soltar) return;
         nota(`Saindo de "${hunt}".`);
+        if (interrompido()) return;
 
         // 1. cidade
         const cerulean = porTitulo('Voltar para Cerulean');
@@ -249,6 +267,7 @@ PPX.modulo(
         }
         cerulean.click();
         await esperar(3000);
+        if (interrompido()) return;
 
         // 1b. a Joy, que fica no caminho. Toda volta a' cidade passa por ela se alguem caiu —
         // uma equipe caida nao sai de Cerulean, e o jogo recusa a viagem sem dizer porque.
@@ -259,7 +278,27 @@ PPX.modulo(
           if (falta) nota(falta);
         }
 
-        // 2. mercado
+        // 2. protege os itens antes de abrir qualquer tela de venda. Se o Depósito da Família
+        // nao confirmar todos os movimentos, o ciclo para aqui: comprar pode esperar; vender um
+        // token ou card protegido nao tem volta.
+        if (!times?.protegerItensAqui) {
+          nota('A ferramenta Times nao sabe proteger itens. Parei antes da venda.');
+          return;
+        }
+        const protecao = await times.protegerItensAqui(nota, interrompido);
+        if (interrompido()) return;
+        if (!protecao.ok) {
+          nota(`Proteção dos itens falhou: ${protecao.erro} Nada foi vendido.`);
+          return;
+        }
+        nota(
+          protecao.movidos.length
+            ? `Protegidos no Depósito da Família: ${protecao.movidos.join(', ')}.`
+            : 'Nenhum item protegido estava na bolsa.',
+        );
+        await fecharJanela();
+
+        // 3. mercado
         const mercado = porTexto(/Ir ao Mercado/);
         if (!mercado) {
           nota('Nao achei "Ir ao Mercado". Parei em Cerulean.');
@@ -267,10 +306,12 @@ PPX.modulo(
         }
         mercado.click();
         await esperar(3000);
+        if (interrompido()) return;
 
-        // 3. norte ate o Mark — o trajeto e' reto, e a caminhada para sozinha na parede
+        // 4. norte ate o Mark — o trajeto e' reto, e a caminhada para sozinha na parede
         let achou = await acharMark();
         for (let tent = 0; !achou && tent < 6; tent += 1) {
+          if (interrompido()) return;
           const andou = await andar('ArrowUp', 6);
           if (!andou) break;
           achou = await acharMark();
@@ -284,14 +325,16 @@ PPX.modulo(
           return;
         }
         nota('Loja aberta.');
+        if (interrompido()) return;
 
-        // 4. venda
+        // 5. venda de pokémon e itens
         if (vender) {
           const r = await vender();
           nota(r);
         }
+        if (interrompido()) return;
 
-        // 5. compras ate o teto
+        // 6. compras ate o teto
         // Quem sabe comprar e' a Loja: ela abre o inventario uma vez, compra a diferenca de
         // cada item e confere no fim abrindo outra vez. Antes este laco vivia aqui e abria o
         // inventario duas vezes **por item** — dezoito aberturas para nove itens.
@@ -303,15 +346,20 @@ PPX.modulo(
       } finally {
         await fecharInventario();
         await fecharJanela();
-        const voltou = await voltarPara(hunt);
-        nota(voltou ? `De volta a "${hunt}".` : 'Nao consegui voltar sozinho.');
+        const eraHunt = hunt && !/^(Cerulean|Market|Shopping)$/i.test(hunt);
+        if (pararPedido) nota('Ciclo parado pelo botão.');
+        else if (eraHunt) {
+          const voltou = await voltarPara(hunt);
+          nota(voltou ? `De volta a "${hunt}".` : 'Nao consegui voltar sozinho.');
+        }
         if (soltar) soltar();
         rodando = false;
+        pararPedido = false;
         contar = null;
       }
     }
 
-    // A loja publica `comprar` e `venderAgora`; o ciclo so' os encadeia. Se o pacote rodar sem o
+    // A loja publica `comprar` e `venderTudo`; o ciclo so' os encadeia. Se o pacote rodar sem o
     // modulo da loja, o ciclo ainda anda ate la' e abre — so' nao compra nem vende.
     const daLoja = () => globalThis.PPX?.loja || {};
 
@@ -326,7 +374,7 @@ PPX.modulo(
         e.preventDefault();
         e.stopPropagation();
         const l = daLoja();
-        rodar(l.venderAgora, l.comprar);
+        rodar(l.venderTudo || l.venderAgora, l.comprar);
       },
       true,
     );
@@ -373,7 +421,7 @@ PPX.modulo(
       prazo = setTimeout(async () => {
         ultima = Date.now();
         const l = globalThis.PPX?.loja || {};
-        await rodar(l.venderAgora, l.comprar);
+        await rodar(l.venderTudo || l.venderAgora, l.comprar);
         reagendar();
       }, espera);
     }
@@ -392,12 +440,16 @@ PPX.modulo(
       horarios.placeholder = '08:00-09:00, 20:00-21:00';
       horarios.value = cfgAg.horarios || '';
       horarios.title = 'Janelas de horário. O ciclo roda uma vez dentro de cada uma.';
+      horarios.style.width = '100%';
+      horarios.style.minWidth = '190px';
 
       const editor = ag.montarControles({
         resumoDe: (dias) => ag.resumo({ dias, horarios: horarios.value.trim() }),
       });
       if (!editor) return null;
-      editor.campo.value = cfgAg.dias || '';
+      // Tambem atualiza as listas e o resumo visivel do botao. Atribuir somente ao hidden deixava
+      // o botao sem texto, fazendo a configuracao parecer indisponivel.
+      editor.escrever(cfgAg.dias || '');
 
       const linha = document.createElement('div');
       linha.className = 'ljx-l';
@@ -415,6 +467,7 @@ PPX.modulo(
       };
       editor.campo.addEventListener('change', guardar);
       horarios.addEventListener('change', guardar);
+      horarios.addEventListener('input', guardar);
       return editor;
     }
 
@@ -423,6 +476,8 @@ PPX.modulo(
     globalThis.PPX = globalThis.PPX || {};
     globalThis.PPX.ciclo = {
       rodar,
+      parar,
+      rodando: () => rodando,
       andar,
       acharMark,
       estoque,
@@ -439,6 +494,6 @@ PPX.modulo(
     };
 
     if (typeof module !== 'undefined' && module.exports)
-      module.exports = { rodar, andar, acharMark, estoque, local, voltarPara };
+      module.exports = { rodar, parar, rodando: () => rodando, andar, acharMark, estoque, local, voltarPara };
   },
 );

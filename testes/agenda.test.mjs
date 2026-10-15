@@ -198,6 +198,23 @@ test('o resumo diz a agenda em uma linha, em portugues', () => {
   assert.equal(diz('seg', ''), '');
 });
 
+test('o editor nasce visivel e o horario e guardado enquanto se escreve', () => {
+  // O botão da agenda já nasceu apenas com a seta: sem um resumo inicial, parecia que não havia
+  // controle para abrir e preencher o horário. O ciclo também deve hidratar o editor pela API,
+  // pois escrever diretamente no hidden não atualiza nem as listas nem o texto do botão.
+  assert.match(fonte, /mostrarCertos\(\);\s*\/\/[^]*?resumir\(\);\s*return \{ el, corpo/);
+
+  const ciclo = readFileSync(new URL('../ciclo.js', import.meta.url), 'utf8');
+  assert.match(ciclo, /editor\.escrever\(cfgAg\.dias \|\| ''\)/);
+  assert.match(ciclo, /horarios\.addEventListener\('input', guardar\)/);
+});
+
+test('o ciclo carrega antes da loja que monta o editor da agenda', () => {
+  const manifesto = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const scripts = manifesto.content_scripts.flatMap((grupo) => grupo.js || []);
+  assert.ok(scripts.indexOf('ciclo.js') < scripts.indexOf('loja.js'));
+});
+
 // ---------------------------------------------------------------------------
 // O guarda da regra: ninguém volta a ter o calendário em casa.
 

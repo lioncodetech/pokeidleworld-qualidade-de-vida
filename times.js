@@ -140,6 +140,182 @@ PPX.modulo(
       return /\bon\b/.test(aba.className);
     }
 
+    const ITENS_PROTEGIDOS = [
+      /^Poke Card Pack$/i,
+      /^Bronze Dimensional Key$/i,
+      /^Devoted Token$/i,
+      /^Strange Pheromone$/i,
+      /^Shiny .+ Card$/i,
+      /^Rare Pokemon Picture$/i,
+      /^Bronze Boss Token$/i,
+      /^Legendary Golden Ticket$/i,
+    ];
+    const protegido = (nome) => ITENS_PROTEGIDOS.some((re) => re.test(nome));
+    // A API do Depósito nao manda o nome de alguns itens da bolsa. Na tela real eles aparecem
+    // como `Item #6352` e `Item #70000`, embora o Inventário mostre os nomes normalmente.
+    // IDs confirmados diretamente no jogo em 15/10/2026.
+    const NOMES_POR_ID = new Map([
+      ['6352', 'Poke Card Pack'],
+      ['59195', 'Rare Pokemon Picture'],
+      ['70000', 'Bronze Boss Token'],
+      ['90127', 'Legendary Golden Ticket'],
+    ]);
+
+    async function abaFamiliaItens() {
+      const w = janela();
+      if (!w) return false;
+      const aba = [...w.querySelectorAll('.nsh-tab')].find((b) =>
+        /Fam[ií]lia:\s*Itens/i.test(b.textContent || ''),
+      );
+      if (!aba) return false;
+      if (!/\bon\b/.test(aba.className)) {
+        aba.click();
+        await esperar(700);
+      }
+      return /\bon\b/.test(aba.className);
+    }
+
+    const nomeDoItem = (linha) => {
+      const bruto = (
+        linha.querySelector('.fam-n')?.textContent ||
+        linha.querySelector('.dpt-name')?.textContent ||
+        linha.querySelector('img')?.alt ||
+        linha.textContent ||
+        ''
+      ).trim();
+      const id = bruto.match(/\bItem\s*#\s*(\d+)\b/i)?.[1];
+      return NOMES_POR_ID.get(id) || bruto;
+    };
+    const setaDaLinha = (linha, w = janela()) => {
+      const botoes = [...(linha?.querySelectorAll?.('button') || [])];
+      const marcada = linha?.querySelector?.('.dpt-arrow');
+      if (marcada && !botoes.includes(marcada)) botoes.push(marcada);
+      // Direita guarda; esquerda retira do depósito. Nunca aceitar a seta apenas pela classe.
+      const direita = botoes.find((b) => /▶|→/.test(b.textContent || ''));
+      if (direita) return direita;
+      // No jogo atual a seta pode ser um icone/CSS e ter `textContent` vazio. Nesse caso a
+      // geometria e' inequívoca: "Sua Bolsa" e' a metade esquerda, e Família fica a direita.
+      const rl = linha?.getBoundingClientRect?.();
+      const rw = w?.getBoundingClientRect?.();
+      const naBolsa = rl && rw && rl.width >= 0 && rw.width > 0 &&
+        rl.left + rl.width / 2 < rw.left + rw.width / 2;
+      return naBolsa ? (marcada || botoes[0] || null) : null;
+    };
+    const linhasDaBolsa = () => {
+      const w = janela();
+      const familiaBolsa = w?.querySelectorAll('.fam-cols .fam-col')?.[0];
+      const bolsa = w?.querySelectorAll('.dpt-col')?.[0];
+      if (!w) return [];
+      // A aba Família: Itens e' um componente separado no jogo. Ela nao usa `.dpt-col` nem
+      // `.dpt-row`: a coluna esquerda (Sua bolsa) usa `.fam-col` e cada item usa `.fam-line`.
+      // Procura essa estrutura primeiro e mantem o formato antigo como compatibilidade.
+      const linhas = [...(familiaBolsa?.querySelectorAll('.fam-line') || [])]
+        .filter((l) => nomeDoItem(l) && setaDaLinha(l));
+      linhas.push(
+        ...[...(bolsa?.querySelectorAll('.dpt-item-row, .dpt-row') || [])]
+          .filter((l) => nomeDoItem(l) && setaDaLinha(l)),
+      );
+      // A versao atual do jogo desenha algumas linhas da bolsa sem `.dpt-row` e sem imagem:
+      // fica apenas `Item #NNN`, o campo de quantidade e o botao ▶. Nesse formato, o elemento
+      // mais estavel e justamente a seta para guardar. Subimos dela ate' ao menor ancestral que
+      // contenha o ID e continuamos exigindo a seta para a direita, para nunca recolher da familia.
+      for (const seta of w.querySelectorAll('button')) {
+        const rs = seta.getBoundingClientRect?.();
+        const rw = w.getBoundingClientRect?.();
+        const naBolsa = rs && rw && rw.width > 0 &&
+          rs.left + rs.width / 2 < rw.left + rw.width / 2;
+        if (!naBolsa && !/▶|→/.test(seta.textContent || '')) continue;
+        let no = seta.parentElement;
+        for (let i = 0; no && no !== w && i < 8; i += 1, no = no.parentElement) {
+          const nome = nomeDoItem(no);
+          if (nome && (protegido(nome) || /\bItem\s*#\s*\d+\b/i.test(no.textContent || ''))) {
+            if (!linhas.some((l) => l === no || nomeDoItem(l) === nomeDoItem(no))) linhas.push(no);
+            break;
+          }
+        }
+      }
+      // Itens de quantidade 1, como Bronze Boss Token e Poke Card Pack, aparecem sem contador e
+      // algumas versoes do jogo nao lhes dao a classe `dpt-row`. A imagem continua com o nome no
+      // `alt`; sobe-se ate ao primeiro ancestral que tenha a seta para o Depósito da Família.
+      // Procura na janela inteira: o jogo atual nem sempre mantem `.dpt-col` nas duas colunas.
+      // A direcao da seta, e nao a coluna/classe, e' que prova que o item esta em "Sua Bolsa".
+      for (const img of w.querySelectorAll('img[alt]')) {
+        let no = img.parentElement;
+        for (let i = 0; no && no !== w && i < 8; i += 1, no = no.parentElement) {
+          if (setaDaLinha(no)) {
+            if (!linhas.some((l) => l === no || nomeDoItem(l) === nomeDoItem(no))) linhas.push(no);
+            break;
+          }
+        }
+      }
+      return linhas;
+    };
+    const quantidadeDaLinha = (linha) => {
+      const campo = linha?.querySelector('.fam-q') || linha?.querySelector('input');
+      const n = Number(String(
+        campo?.value || campo?.placeholder || linha?.querySelector('.dpt-qty')?.textContent || '1',
+      ).replace(/\D/g, ''));
+      return Number.isFinite(n) && n > 0 ? n : 1;
+    };
+
+    async function esperarFamiliaItens() {
+      // Ao trocar de aba, o jogo pede `family-get` e `inv-get` pelo WebSocket. A aba pode ficar
+      // alguns instantes em "Carregando..."; uma leitura nesse intervalo nao prova bolsa vazia.
+      for (let tentativa = 0; tentativa < 24; tentativa += 1) {
+        const w = janela();
+        if (w?.querySelector('.fam-cols') || /Bolsa vazia\./i.test(w?.textContent || '')) return true;
+        await esperar(250);
+      }
+      return false;
+    }
+
+    /**
+     * Guarda no Depósito da Família apenas a lista fechada de itens protegidos.
+     *
+     * Esta porta nao pede a vez: o Ciclo ja' segura a fila inteira. Se um movimento nao se
+     * confirmar, para antes da venda — vender com um protegido ainda na bolsa e' irreversivel.
+     */
+    async function protegerItensAqui(aviso = () => {}, cancelado = () => false) {
+      const ida = await irAoDeposito(aviso, cancelado);
+      if (!ida.ok) return { ok: false, movidos: [], erro: ida.motivo };
+      if (!(await abaFamiliaItens()))
+        return { ok: false, movidos: [], erro: 'Nao consegui abrir Família: Itens no Depósito.' };
+      if (!(await esperarFamiliaItens()))
+        return {
+          ok: false,
+          movidos: [],
+          erro: 'Família: Itens continuou carregando. Parei antes da venda.',
+        };
+
+      const movidos = [];
+      const primeiraLeitura = linhasDaBolsa();
+      const nomesLidos = primeiraLeitura.map(nomeDoItem).filter(Boolean);
+      const protegidosLidos = nomesLidos.filter(protegido);
+      aviso(
+        `Depósito: ${nomesLidos.length} item(ns) na bolsa; ` +
+        `${protegidosLidos.length} protegido(s) encontrado(s)` +
+        `${protegidosLidos.length ? `: ${protegidosLidos.join(', ')}` : '.'}`,
+      );
+      while (true) {
+        if (cancelado()) return { ok: false, movidos, erro: 'Ciclo interrompido.' };
+        const linha = linhasDaBolsa().find((l) => protegido(nomeDoItem(l)));
+        if (!linha) break;
+        const nome = nomeDoItem(linha);
+        const antes = quantidadeDaLinha(linha);
+        const seta = setaDaLinha(linha);
+        if (!seta || seta.disabled)
+          return { ok: false, movidos, erro: `Nao consegui guardar ${nome}: seta indisponível.` };
+        aviso(`Protegendo ${nome} no Depósito da Família…`);
+        seta.click();
+        await esperar(700);
+        const depois = linhasDaBolsa().find((l) => nomeDoItem(l).toLowerCase() === nome.toLowerCase());
+        if (depois && quantidadeDaLinha(depois) >= antes)
+          return { ok: false, movidos, erro: `${nome} continuou na bolsa; parei antes da venda.` };
+        movidos.push(nome);
+      }
+      return { ok: true, movidos, erro: '' };
+    }
+
     /** As fichas da equipe de agora, na ordem em que estao. */
     function timeAtual() {
       const c = colunas();
@@ -485,7 +661,30 @@ PPX.modulo(
      * usar no fim, mesmo quando a montagem falhar: ficar plantado em Cerulean e' pior do que nao
      * ter saido.
      */
-    async function irAoDeposito(aviso = () => {}) {
+    async function aproximarDaPlaca(alvo, cancelado = () => false) {
+      if (!alvo?.getBoundingClientRect || typeof KeyboardEvent === 'undefined') return false;
+      const cod = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
+      const dar = (tipo, dir) =>
+        dispatchEvent(new KeyboardEvent(tipo, {
+          key: dir, code: dir, keyCode: cod[dir], which: cod[dir], bubbles: true, cancelable: true,
+        }));
+      for (let i = 0; i < 90 && !cancelado(); i += 1) {
+        const r = alvo.getBoundingClientRect();
+        const dx = r.x + r.width / 2 - innerWidth / 2;
+        const dy = r.y + r.height / 2 - innerHeight / 2;
+        if (Math.abs(dx) < 210 && Math.abs(dy) < 170) return true;
+        const dir = Math.abs(dy) >= Math.abs(dx)
+          ? (dy < 0 ? 'ArrowUp' : 'ArrowDown')
+          : (dx < 0 ? 'ArrowLeft' : 'ArrowRight');
+        dar('keydown', dir);
+        await esperar(140);
+        dar('keyup', dir);
+        await esperar(45);
+      }
+      return false;
+    }
+
+    async function irAoDeposito(aviso = () => {}, cancelado = () => false) {
       // `abriu` diz se a janela e' nossa. Uma que ja' estava na tela e' do jogador, e fechar o
       // que o jogador abriu seria mexer no que nao e' nosso.
       if (janela()) return { ok: true, volta: null, abriu: false };
@@ -527,6 +726,19 @@ PPX.modulo(
       // Um instante antes de clicar, como quem olha a tela e so' depois clica.
       await esperar(900);
       depot.click();
+
+      // A placa existe no DOM mesmo longe do personagem, mas o jogo ignora esse clique. Depois
+      // de voltar a Cerulean o Depot pode estar fora da tela; aproxima-se antes de tentar outra vez.
+      if (!(await ateQue(() => !!document.querySelector('[class*=npc-dlg]') || !!janela(), 1800))) {
+        aviso('Caminhando até o Depot…');
+        if (!(await aproximarDaPlaca(depot, cancelado)))
+          return {
+            ok: false, volta, abriu: false,
+            motivo: cancelado() ? 'Ciclo interrompido.' : 'Nao consegui chegar perto do Depot.',
+          };
+        if (cancelado()) return { ok: false, volta, abriu: false, motivo: 'Ciclo interrompido.' };
+        depot.click();
+      }
 
       // **Sao dois cliques, nao um.** Medido em 09/10/2026: a placa abre um dialogo do NPC
       // ("Depot — Guarda seus itens no depósito") com um botao `.npc-dlg-btn` escrito "Abrir
@@ -1195,9 +1407,9 @@ PPX.modulo(
       return { ok, erro: ok ? '' : msg, msg };
     }
 
-    globalThis.PPX.times = { salvarTime, montarTime, apagarTime, timeAtual, nomes, usar, curar, curarAqui, alguemCaido, cfg };
+    globalThis.PPX.times = { salvarTime, montarTime, apagarTime, timeAtual, nomes, usar, curar, curarAqui, protegerItensAqui, alguemCaido, cfg };
 
     if (typeof module !== 'undefined' && module.exports)
-      module.exports = { salvarTime, montarTime, apagarTime, timeAtual, nomes, usar, curar, curarAqui, alguemCaido, cfg };
+      module.exports = { salvarTime, montarTime, apagarTime, timeAtual, nomes, usar, curar, curarAqui, protegerItensAqui, alguemCaido, cfg };
   },
 );

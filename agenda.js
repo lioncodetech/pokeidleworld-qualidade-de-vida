@@ -519,6 +519,9 @@
     abre.addEventListener('click', () => alternar());
 
     mostrarCertos();
+    // O botao precisa nascer com texto. Sem isto ele mostra apenas a setinha e a agenda parece
+    // inexistente ate que algum controle seja alterado.
+    resumir();
     return { el, corpo, campo, escrever, resumir, alternar, usarDias, abre };
   };
 

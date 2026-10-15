@@ -87,6 +87,7 @@ function montar({
   jogoDiz = '',
   // O mesmo aviso, mas vindo de dentro do chat — onde qualquer jogador escreve qualquer coisa.
   chatDiz = '',
+  catalogoResposta = { hunts: [] },
 } = {}) {
   let local = aqui;
   const viagens = [];
@@ -205,6 +206,7 @@ function montar({
     'innerWidth',
     'innerHeight',
     'MutationObserver',
+    'fetch',
     'module',
     fonte,
   )(
@@ -222,6 +224,7 @@ function montar({
     1000,
     800,
     ObservadorFalso,
+    async () => ({ ok: true, status: 200, json: async () => catalogoResposta }),
     mod,
   );
 
@@ -245,6 +248,52 @@ test('o lugar guardado atravessa o F5', () => {
   const p = montar({ aqui: 'Route 4' });
   p.api.salvar();
   assert.match(Object.values(p.guardado).join(''), /Route 4/);
+});
+
+test('modo compacto mostra resumo, nao a lista de hunts', () => {
+  assert.match(fonte, /\.cjx\.compacto \.cjx-lista/);
+  assert.match(fonte, /className = 'cjx-resumo'/);
+  assert.match(fonte, /hunts · \$\{cfg\.lista\.length\} favoritas/);
+});
+
+test('carrega do jogo todas as caçadas, inclusive as regioes ainda bloqueadas', async () => {
+  const p = montar({
+    listaCrua: [{ nome: 'Route 4', time: '' }],
+    catalogoResposta: {
+      hunts: [
+        { name: 'Shadow Lugia', level: 700, area: 'orre' },
+        { name: 'Route 4', level: 20, area: 'kanto' },
+        { name: 'Brave Venusaur', level: 180, area: 'outland' },
+        { name: 'Cerulean', level: 0, area: 'kanto' },
+      ],
+    },
+  });
+
+  await p.api.atualizarCatalogo(true);
+  const todas = p.api.todasConhecidas();
+
+  assert.deepEqual(
+    todas.map((c) => c.nome),
+    ['Route 4', 'Brave Venusaur', 'Shadow Lugia'],
+    'o atalho guardado vem primeiro e o catalogo completa o resto',
+  );
+  assert.equal(todas[0].guardada, true);
+  assert.equal(todas.find((c) => c.nome === 'Shadow Lugia').trancada, true);
+  assert.equal(todas.find((c) => c.nome === 'Brave Venusaur').trancada, false);
+  assert.match(p.guardado['lioncode:pokeidleworld:cacadas:catalogo'], /Shadow Lugia/);
+});
+
+test('catalogo bloqueado explica a regiao sem abrir o mapa', async () => {
+  const p = montar({
+    aqui: 'Meowth',
+    catalogoResposta: { hunts: [{ name: 'Shadow Lugia', level: 700, area: 'orre' }] },
+  });
+  await p.api.atualizarCatalogo(true);
+
+  const r = await p.api.ir('Shadow Lugia', () => {}, { time: '' });
+
+  assert.match(r, /fica em Orre, que o seu nivel ainda nao destranca/, r);
+  assert.deepEqual(p.viagens, []);
 });
 
 test('nao guarda a cidade nem a loja como se fossem caçada', () => {

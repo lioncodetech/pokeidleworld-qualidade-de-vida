@@ -13,7 +13,7 @@ import test from 'node:test';
 const fonte = readFileSync(new URL('../loja.js', import.meta.url), 'utf8');
 
 /** Um no de mentira: so o que o modulo toca. */
-function no(cls, texto = '') {
+function no(cls, texto = '', extras = {}) {
   return {
     className: cls,
     textContent: texto,
@@ -22,6 +22,7 @@ function no(cls, texto = '') {
     innerText: texto,
     disabled: false,
     checked: false,
+    dataset: {},
     filhos: [],
     cliques: 0,
     click() {
@@ -34,6 +35,7 @@ function no(cls, texto = '') {
     querySelectorAll(sel) {
       return this.filhos.filter((f) => casa(f, sel));
     },
+    ...extras,
   };
 }
 
@@ -65,6 +67,7 @@ function montarLoja({
   semBarra = false,
   barraTeimosa = false,
   tetoDaBarra = 10000,
+  tooltipDinamico = {},
 } = {}) {
   const compras = [];
   const janela = no('mks-window');
@@ -76,7 +79,7 @@ function montarLoja({
   };
   janela.filhos.push(ouro);
 
-  for (const rot of ['🛒 Comprar', '💰 Vender', '🐾 Pokémon']) {
+  for (const rot of ['🛒 Comprar', '💰 Vender', '🐾 Pokémon', '🎒 Itens']) {
     const t = no(rot === '🛒 Comprar' ? 'nsh-tab on' : 'nsh-tab', rot);
     janela.filhos.push(t);
   }
@@ -133,6 +136,10 @@ function montarLoja({
       for (let i = 0; i < cabem; i += 1) compras.push(l.nome);
       // O que se compra entra na mochila: e' la' que a conferencia do fim vai olhar.
       if (sacola && typeof sacola[l.nome] === 'number') sacola[l.nome] += cabem;
+      else if (sacola && typeof sacola[l.nome]?.exato === 'number') {
+        sacola[l.nome].exato += cabem;
+        sacola[l.nome].title = `Quantidade: ${sacola[l.nome].exato}`;
+      }
       else if (sacola && !(l.nome in sacola)) sacola[l.nome] = cabem;
       atualizarOuro();
     };
@@ -217,22 +224,41 @@ function montarLoja({
   fecharInv.ehBotao = true;
   fecharInv.aoClicar = () => {
     invAberto = false;
+    slotsCache = null;
   };
   const janelaInv = no('inv-window', '');
   janelaInv.filhos.push(fecharInv);
 
+  let observadorTooltip = null;
+  class ObservadorTooltip {
+    constructor(fn) { this.fn = fn; }
+    observe() { observadorTooltip = this; }
+    disconnect() { if (observadorTooltip === this) observadorTooltip = null; }
+  }
+  class EventoMouse { constructor(type) { this.type = type; } }
+
+  let slotsCache = null;
   const slots = () => {
     if (!sacola) return [];
-    return Object.entries(sacola)
+    if (slotsCache) return slotsCache;
+    slotsCache = Object.entries(sacola)
       .filter(([, q]) => q !== 0)
       .map(([nome, q]) => {
         const s = no('inv-slot', '');
-        const qty = no('inv-qty', String(q));
+        const valor = typeof q === 'object' ? q : { texto: q };
+        const qty = no('inv-qty', String(valor.texto), { title: valor.title || '' });
         s.filhos.push(qty);
+        s.getBoundingClientRect = () => ({ x: 0, y: 0, width: 40, height: 40 });
+        s.dispatchEvent = (ev) => {
+          const exato = tooltipDinamico[nome];
+          if (exato && ev.type === 'mouseover' && observadorTooltip)
+            observadorTooltip.fn([{ target: { textContent: `Quantidade: ${exato}` }, addedNodes: [] }]);
+        };
         s.querySelector = (sel) =>
           sel === 'img' ? { alt: nome } : sel === '.inv-qty' ? qty : null;
         return s;
       });
+    return slotsCache;
   };
 
   const doc = {
@@ -309,6 +335,8 @@ function montarLoja({
     'localStorage',
     'setTimeout',
     'addEventListener',
+    'MutationObserver',
+    'MouseEvent',
     'module',
     fonte,
   );
@@ -323,6 +351,8 @@ function montarLoja({
     },
     (fn, ms) => globalThis.setTimeout(fn, Math.min(ms, 1)),
     () => {},
+    ObservadorTooltip,
+    EventoMouse,
     mod,
   );
 
@@ -449,6 +479,32 @@ test('venda: desmarca o protegido sozinho e segue com o resto', async () => {
   const r = await p.api.prepararVenda(() => {});
   assert.equal(r.ok, true);
   assert.equal(r.total, 1, 'so o comum ficou marcado');
+});
+
+test('venda de itens: desmarca somente a lista protegida e deixa o restante', async () => {
+  const protegidos = [
+    'Poke Card Pack',
+    'Bronze Dimensional KEY',
+    'Devoted Token',
+    'Strange Pheromone',
+    'Shiny Charizard Card',
+    'Rare Pokemon Picture',
+    'Bronze Boss Token',
+    'Legendary Golden Ticket',
+  ];
+  const p = montarLoja({
+    linhas: [...protegidos.map((nome) => ({ nome })), { nome: 'Bone' }, { nome: 'Bag of Pollen' }],
+  });
+
+  const r = await p.api.prepararVenda(() => {}, 'Itens');
+
+  assert.equal(r.ok, true);
+  assert.equal(r.total, 2, 'somente os dois itens comuns ficaram marcados');
+  assert.deepEqual(
+    p.linhas.filter((l) => l.querySelector('.mks-check').checked)
+      .map((l) => l.querySelector('.mks-name').textContent),
+    ['Bone', 'Bag of Pollen'],
+  );
 });
 
 test('venda: para se a conta do jogo nao bate com a da tela', async () => {
@@ -598,6 +654,37 @@ test('9999+ nao e numero: nao compra as cegas', async () => {
 
   assert.deepEqual(p.compras, []);
   assert.match(r.relato.join(' '), /já passa de 9999/);
+});
+
+test('9999+ usa a quantidade exata do tooltip para completar o alvo', async () => {
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: LOJA_BOLAS,
+    mochila: { 'Ultra Ball': { texto: '9999+', title: 'Quantidade: 12.345', exato: 12345 } },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 12350 };
+  p.api.cfg.variacao = 0;
+
+  const r = await p.api.abastecer();
+
+  assert.equal(p.compras.filter((n) => n === 'Ultra Ball').length, 5);
+  assert.match(r.relato.join(' '), /12345 → 12350 \(\+5\)/);
+});
+
+test('9999+ captura o tooltip que o jogo cria somente durante o hover', async () => {
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: LOJA_BOLAS,
+    mochila: { 'Ultra Ball': { texto: '9999+', exato: 12345 } },
+    tooltipDinamico: { 'Ultra Ball': 12345 },
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 12350 };
+  p.api.cfg.variacao = 0;
+
+  const r = await p.api.abastecer();
+
+  assert.equal(p.compras.filter((n) => n === 'Ultra Ball').length, 5);
+  assert.match(r.relato.join(' '), /12345 → 12350 \(\+5\)/);
 });
 
 test('sem conseguir abrir a mochila, nao compra nada', async () => {
@@ -776,4 +863,9 @@ test('o que o minimizado esconde esta marcado, e o que ele guarda nao', () => {
       css.includes(`.ljx.compacto ${classe}`),
       `a regra do minimizado nao esconde ${classe}`,
     );
+});
+
+test('painel oferece um botao proprio para parar o ciclo', () => {
+  assert.match(fonte, /⏹ Parar ciclo/);
+  assert.match(fonte, /c\?\.parar\?\.\(\)/);
 });

@@ -18,6 +18,12 @@ const fonte = readFileSync(new URL('../times.js', import.meta.url), 'utf8');
 function deposito({
   equipe = [],
   box = [],
+  itens = [],
+  familiaItens = [],
+  itensSemClasse = false,
+  itensSoTexto = false,
+  setasSemTexto = false,
+  familiaEstrutura = false,
   travado = false,
   semAba = false,
   semJanela = false,
@@ -25,7 +31,12 @@ function deposito({
   // pokemon caido, que e' o caso que a cura so'-antes nao cobriria.
   aoTrazer = () => {},
 }) {
-  const est = { equipe: [...equipe], box: [...box] };
+  const est = {
+    equipe: [...equipe],
+    box: [...box],
+    itens: [...itens],
+    familiaItens: [...familiaItens],
+  };
   let menor = est.equipe.length;
   const CHEIA = 6;
 
@@ -67,21 +78,111 @@ function deposito({
     querySelectorAll: (sel) => (sel === '.dpt-poke-row' ? est[onde].map((k) => linha(k, onde)) : []),
   });
 
-  let abaLigada = false;
+  let abaAtiva = '';
   const aba = {
     get className() {
-      return `nsh-tab${abaLigada ? ' on' : ''}`;
+      return `nsh-tab${abaAtiva === 'pokemon' ? ' on' : ''}`;
     },
     textContent: '⚔ Pokémon',
     click() {
-      if (!semAba) abaLigada = true;
+      if (!semAba) abaAtiva = 'pokemon';
     },
   };
 
+  const abaItens = {
+    get className() {
+      return `nsh-tab${abaAtiva === 'itens' ? ' on' : ''}`;
+    },
+    textContent: '👨‍👩‍👧 Família: Itens',
+    click() {
+      if (!semAba) abaAtiva = 'itens';
+    },
+  };
+
+  const linhaItem = (item, onde) => {
+    const nome = typeof item === 'string' ? item : item.nome;
+    const qtd = typeof item === 'string' ? 1 : item.qtd;
+    const seta = {
+      className: 'dpt-arrow',
+      textContent: setasSemTexto ? '' : (onde === 'bolsa' ? '▶' : '◀'),
+      disabled: false,
+      getBoundingClientRect: () => ({
+        left: onde === 'bolsa' ? 245 : 325,
+        width: 36,
+      }),
+      click() {
+        const de = onde === 'bolsa' ? est.itens : est.familiaItens;
+        const para = onde === 'bolsa' ? est.familiaItens : est.itens;
+        const i = de.indexOf(item);
+        if (i >= 0) para.push(...de.splice(i, 1));
+      },
+    };
+    const img = { alt: nome, parentElement: null };
+    const linha = {
+      className: itensSemClasse ? 'deposit-item' : 'dpt-item-row dpt-row',
+      textContent: `${nome} ${qtd} ${seta.textContent}`,
+      parentElement: null,
+      querySelector(sel) {
+        if (sel === '.fam-n') return familiaEstrutura ? peca(nome) : null;
+        if (sel === '.fam-q') return familiaEstrutura ? { value: '', placeholder: String(qtd) } : null;
+        if (sel === '.dpt-name') return itensSoTexto ? null : peca(nome);
+        if (sel === 'img') return itensSoTexto ? null : img;
+        if (sel === 'input') return { value: String(qtd) };
+        if (sel === '.dpt-arrow') return seta;
+        return null;
+      },
+      querySelectorAll: (sel) => (sel === 'button' ? [seta] : []),
+      getBoundingClientRect: () => ({
+        left: onde === 'bolsa' ? 20 : 320,
+        width: 240,
+      }),
+    };
+    img.parentElement = linha;
+    return linha;
+  };
+
+  const colItens = (onde) => {
+    const col = {
+      querySelectorAll(sel) {
+        const linhas = est[onde].map((item) => linhaItem(item, onde === 'itens' ? 'bolsa' : 'familia'));
+        for (const l of linhas) l.parentElement = col;
+        if (sel === '.fam-line') return familiaEstrutura ? linhas : [];
+        if (sel === '.dpt-item-row, .dpt-row') return itensSemClasse ? [] : linhas;
+        if (sel === 'img[alt]') return linhas.map((l) => l.querySelector('img'));
+        return [];
+      },
+    };
+    return col;
+  };
+
   const janela = {
+    getBoundingClientRect: () => ({ left: 0, width: 600 }),
+    querySelector: (sel) =>
+      sel === '.fam-cols' && abaAtiva === 'itens' ? { className: 'fam-cols' } : null,
     querySelectorAll: (sel) => {
-      if (sel === '.dpt-col') return [col('equipe'), col('box')];
-      if (sel === '.nsh-tab') return semAba ? [] : [aba];
+      if (sel === '.fam-cols .fam-col' && abaAtiva === 'itens' && familiaEstrutura)
+        return [colItens('itens'), colItens('familiaItens')];
+      if (sel === '.dpt-col')
+        return abaAtiva === 'itens'
+          ? (familiaEstrutura ? [] : [colItens('itens'), colItens('familiaItens')])
+          : [col('equipe'), col('box')];
+      if (sel === '.nsh-tab') return semAba ? [] : [aba, abaItens];
+      if (sel === 'img[alt]' && abaAtiva === 'itens') {
+        const cols = [colItens('itens'), colItens('familiaItens')];
+        return itensSoTexto ? [] : cols.flatMap((c) => c.querySelectorAll('img[alt]'));
+      }
+      if (sel === 'button' && abaAtiva === 'itens') {
+        const linhas = [
+          ...est.itens.map((item) => linhaItem(item, 'bolsa')),
+          ...est.familiaItens.map((item) => linhaItem(item, 'familia')),
+        ];
+        for (const l of linhas) l.parentElement = janela;
+        return linhas.flatMap((l) => {
+          const botoes = l.querySelectorAll('button');
+          for (const b of botoes) b.parentElement = l;
+          return botoes;
+        });
+      }
       return [];
     },
   };
@@ -545,6 +646,192 @@ test('apagar um time guardado nao toca na equipe do jogo', async () => {
 
 // --- a ida ate' o Deposito ---------------------------------------------------------------------
 
+test('guarda no deposito da familia somente os itens protegidos', async () => {
+  const protegidos = [
+    { nome: 'Poke Card Pack', qtd: 10 },
+    { nome: 'Bronze Dimensional KEY', qtd: 2 },
+    { nome: 'Devoted Token', qtd: 532 },
+    { nome: 'Strange Pheromone', qtd: 1 },
+    { nome: 'Shiny Raichu Card', qtd: 1 },
+    { nome: 'Rare Pokemon Picture', qtd: 4 },
+    { nome: 'Bronze Boss Token', qtd: 3 },
+    { nome: 'Legendary Golden Ticket', qtd: 1 },
+  ];
+  const comuns = [{ nome: 'Bone', qtd: 18 }, { nome: 'Bag of Pollen', qtd: 56504 }];
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: [...protegidos, ...comuns] } });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, protegidos.map((x) => x.nome));
+  assert.deepEqual(p.dep.est.itens, comuns, 'itens comuns continuaram na bolsa');
+  assert.deepEqual(p.dep.est.familiaItens, protegidos, 'todos os protegidos foram para a família');
+});
+
+test('Bronze Boss Token sem contador nem classe de linha tambem e encontrado', async () => {
+  const token = { nome: 'Bronze Boss Token', qtd: 1 };
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: [token], itensSemClasse: true } });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Bronze Boss Token']);
+  assert.deepEqual(p.dep.est.itens, []);
+  assert.deepEqual(p.dep.est.familiaItens, [token]);
+});
+
+test('procura protegidos na janela inteira sem confundir itens que ja estao na familia', async () => {
+  const token = { nome: 'Bronze Boss Token', qtd: 1 };
+  const pheromone = { nome: 'Strange Pheromone', qtd: 1 };
+  const jaGuardado = { nome: 'Devoted Token', qtd: 532 };
+  const comum = { nome: 'Bone', qtd: 18 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [token, pheromone, comum],
+      familiaItens: [jaGuardado],
+      itensSemClasse: true,
+    },
+  });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Bronze Boss Token', 'Strange Pheromone']);
+  assert.deepEqual(p.dep.est.itens, [comum], 'o item comum permaneceu na mochila');
+  assert.deepEqual(
+    p.dep.est.familiaItens,
+    [jaGuardado, token, pheromone],
+    'a seta para a esquerda nunca foi tratada como item da mochila',
+  );
+});
+
+test('seta desenhada por CSS e reconhecida pela metade esquerda do deposito', async () => {
+  const token = { nome: 'Bronze Boss Token', qtd: 1 };
+  const jaGuardado = { nome: 'Poke Card Pack', qtd: 10 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [token],
+      familiaItens: [jaGuardado],
+      itensSemClasse: true,
+      setasSemTexto: true,
+    },
+  });
+
+  const avisos = [];
+  const r = await p.api.protegerItensAqui((txt) => avisos.push(txt));
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Bronze Boss Token']);
+  assert.deepEqual(p.dep.est.itens, []);
+  assert.deepEqual(p.dep.est.familiaItens, [jaGuardado, token]);
+  assert.match(avisos[0], /1 item\(ns\).*1 protegido\(s\).*Bronze Boss Token/);
+});
+
+test('reconhece pelos IDs reais os nomes escondidos pelo deposito', async () => {
+  const pack = { nome: 'Item #6352', qtd: 1 };
+  const foto = { nome: 'Item #59195', qtd: 2 };
+  const token = { nome: 'Item #70000', qtd: 1 };
+  const comum = { nome: 'Item #11514', qtd: 1 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [pack, foto, token, comum],
+      itensSemClasse: true,
+      setasSemTexto: true,
+    },
+  });
+
+  const avisos = [];
+  const r = await p.api.protegerItensAqui((txt) => avisos.push(txt));
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Poke Card Pack', 'Rare Pokemon Picture', 'Bronze Boss Token']);
+  assert.deepEqual(p.dep.est.itens, [comum]);
+  assert.deepEqual(p.dep.est.familiaItens, [pack, foto, token]);
+  assert.match(avisos[0], /3 protegido\(s\).*Poke Card Pack.*Bronze Boss Token/);
+});
+
+test('usa a estrutura real da aba Familia Itens', async () => {
+  const pack = { nome: 'Item #6352', qtd: 2 };
+  const token = { nome: 'Item #70000', qtd: 1 };
+  const ticket = { nome: 'Item #90127', qtd: 1 };
+  const comum = { nome: 'Item #11514', qtd: 8 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [pack, token, ticket, comum],
+      familiaEstrutura: true,
+      itensSemClasse: true,
+      itensSoTexto: true,
+    },
+  });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Poke Card Pack', 'Bronze Boss Token', 'Legendary Golden Ticket']);
+  assert.deepEqual(p.dep.est.itens, [comum]);
+  assert.deepEqual(p.dep.est.familiaItens, [pack, token, ticket]);
+});
+
+test('acha a linha real somente pelo texto Item ID e pelo botao para a direita', async () => {
+  const pack = { nome: 'Item #6352', qtd: 1 };
+  const token = { nome: 'Item #70000', qtd: 1 };
+  const comum = { nome: 'Item #11514', qtd: 8 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [pack, token, comum],
+      itensSemClasse: true,
+      itensSoTexto: true,
+      setasSemTexto: true,
+    },
+  });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Poke Card Pack', 'Bronze Boss Token']);
+  assert.deepEqual(p.dep.est.itens, [comum]);
+  assert.deepEqual(p.dep.est.familiaItens, [pack, token]);
+});
+
+test('usa a posicao do botao quando linha e seta nao expoem geometria nem texto', async () => {
+  const token = { nome: 'Item #70000', qtd: 1 };
+  const p = montar({
+    dep: {
+      equipe: SEIS,
+      box: BOX,
+      itens: [token],
+      itensSemClasse: true,
+      itensSoTexto: true,
+      setasSemTexto: true,
+    },
+  });
+  p.dep.janela.getBoundingClientRect = () => ({ left: 0, width: 600 });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Bronze Boss Token']);
+  assert.deepEqual(p.dep.est.itens, []);
+});
+
+test('sem a aba Familia: Itens para antes de qualquer venda', async () => {
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: ['Devoted Token'], semAba: true } });
+  const r = await p.api.protegerItensAqui(() => {});
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /Família: Itens/);
+  assert.deepEqual(p.dep.est.itens, ['Devoted Token']);
+});
+
 test('abre o Deposito sozinho quando ele nao esta na tela', async () => {
   const p = montar({ dep: { equipe: SEIS, box: BOX, semJanela: true }, onde: 'Cerulean' });
   p.api.cfg.times.x = [...GUARDADO.slice(0, 5), semNv(SCYTHER)];
@@ -588,8 +875,13 @@ test('sem as placas na tela, diz o motivo em vez de insistir', async () => {
 test('clique na placa que nao abre a janela nao vira montagem no escuro', async () => {
   const p = montar({ dep: { equipe: SEIS, box: BOX, semJanela: true }, placaAbre: false });
   p.api.cfg.times.x = [...GUARDADO.slice(0, 5), semNv(SCYTHER)];
-  assert.match(await p.api.montarTime('x'), /nao abriu/);
+  assert.match(await p.api.montarTime('x'), /nao abriu|chegar perto/);
   assert.deepEqual(p.dep.est.equipe, SEIS);
+});
+
+test('quando o clique distante falha, tenta caminhar ate o Depot', () => {
+  assert.match(fonte, /Caminhando até o Depot/);
+  assert.match(fonte, /aproximarDaPlaca\(depot, cancelado\)/);
 });
 
 test('com o Deposito ja aberto, nao sai do lugar', async () => {

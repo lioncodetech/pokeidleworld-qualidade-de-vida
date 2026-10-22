@@ -92,6 +92,12 @@ export function montarNucleo({ tela = { w: 1920, h: 863 }, jaMonta = false } = {
       setItem: (k, v) => {
         loja[k] = v;
       },
+      // Enumerar e' o que o exportar precisa: ele varre o armazenamento pelo prefixo em vez de
+      // uma lista escrita a mao. Sem `length`/`key` aqui, o teste mediria a banca.
+      get length() {
+        return Object.keys(loja).length;
+      },
+      key: (i) => Object.keys(loja)[i] ?? null,
     },
     doc,
     // O atraso do `resize` e' um debounce de 150 ms. Correr na hora e' o que torna o recorte
@@ -122,6 +128,8 @@ export function montarNucleo({ tela = { w: 1920, h: 863 }, jaMonta = false } = {
   globalThis.PPX = antes;
   return {
     PPX,
+    /** O `localStorage` de mentira, para semear e conferir o que ficou guardado. */
+    loja,
     no,
     tela: (w, h) => {
       globalThis.innerWidth = w;

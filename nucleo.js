@@ -21,6 +21,117 @@
   const CHAVE_VEZ = 'lioncode:pokeidleworld:vez';
   const CHAVE_SUMICO = 'lioncode:pokeidleworld:sumico';
 
+  // ------------------------------------------------------- levar as definicoes para outra janela
+  //
+  // O prefixo de tudo o que este pacote guarda. Exportar e' varrer o `localStorage` por ele, e nao
+  // uma lista escrita a mao: lista a mao envelhece calada — a ferramenta nova guarda a chave dela,
+  // ninguem se lembra de a juntar aqui, e o utilizador descobre que perdeu a configuracao quando
+  // ja' trocou de janela.
+  const PREFIXO = 'lioncode:pokeidleworld:';
+
+  /**
+   * O que **nao** sai no codigo de exportar, e porque.
+   *
+   * - `times`: pedido do utilizador. Um time e' feito dos pokemon daquela conta; levado para
+   *   outra janela ele aponta para bichos que la' nao existem.
+   * - `vez`: nao e' definicao, e' a fila a correr agora. Quem a importasse entrava numa janela
+   *   nova com a vez de outra ja' tomada, e **toda** automacao ficava a espera de alguem que nao
+   *   esta' la'.
+   * - `arrumar:sinal`: recado de uma janela para as outras, vale por instantes.
+   *
+   * `lioncode:gym:tarefa` fica de fora sozinha, por nao ter o prefixo: e' tarefa a meio, nao
+   * definicao.
+   */
+  const FORA_DO_EXPORTE = new Set([PREFIXO + 'times', CHAVE_VEZ, PREFIXO + 'arrumar:sinal']);
+
+  /**
+   * O codigo de exportar, a partir dos pares `[chave, valor]` que o armazenamento tem.
+   *
+   * Recebe os pares em vez de ler o `localStorage` aqui dentro para a decisao poder ser testada
+   * sem navegador — e porque e' a decisao que importa, nao de onde vieram os dados.
+   *
+   * Os valores viajam como texto, exatamente como estao guardados. Reinterpreta-los seria abrir
+   * espaco para o codigo sair diferente do que esta' na janela de origem.
+   */
+  function exportavel(entradas) {
+    const dados = {};
+    let fora = 0;
+    for (const par of entradas || []) {
+      const chave = par && par[0];
+      if (typeof chave !== 'string' || !chave.startsWith(PREFIXO)) continue;
+      if (FORA_DO_EXPORTE.has(chave)) {
+        fora++;
+        continue;
+      }
+      dados[chave] = String(par[1] ?? '');
+    }
+    return { v: 1, de: 'pokeidleworld', dados, quantas: Object.keys(dados).length, fora };
+  }
+
+  /**
+   * Le um codigo de exportar e devolve o que de facto se pode gravar.
+   *
+   * Nada e' aplicado aqui: esta funcao so' decide. Quem grava e' quem a chama, e separar as duas
+   * coisas e' o que permite testar a peneira sem um armazenamento por perto.
+   *
+   * A peneira e' a mesma do exportar, de proposito e nao por simetria bonita: **o codigo colado
+   * nao e' de confianca**. Ele pode vir de uma versao antiga que ainda exportava os times, de uma
+   * janela que o editou a mao, ou de outro pacote. Confiar em que "o exportar ja' tirou" seria
+   * confiar em software que nao esta' a correr aqui.
+   */
+  function importavel(texto) {
+    let dado = null;
+    try {
+      dado = JSON.parse(String(texto || ''));
+    } catch {
+      return { erro: 'Esse código não é um JSON válido.' };
+    }
+    // `null` e' o unico que precisa de guarda: `Object.entries` rebenta com ele e aceita todo o
+    // resto. Numero, texto ou lista nao tem chave com o prefixo e caem sozinhos na recusa la' em
+    // baixo — um ramo so' para eles seria um ramo que nenhum teste consegue distinguir.
+    if (!dado) return { erro: 'Esse código não tem definição nenhuma.' };
+    // Aceita o objeto inteiro do exportar ou so' o mapa de chaves: quem cola texto cola o que tem
+    // a' mao, e recusar por causa da embalagem seria recusar por nada.
+    const vindos = dado.dados && typeof dado.dados === 'object' ? dado.dados : dado;
+    const dados = {};
+    let fora = 0;
+    for (const [chave, valor] of Object.entries(vindos)) {
+      if (typeof chave !== 'string' || !chave.startsWith(PREFIXO)) continue;
+      if (FORA_DO_EXPORTE.has(chave)) {
+        fora++;
+        continue;
+      }
+      if (typeof valor !== 'string') continue;
+      // Valor que nao e' JSON nunca seria lido: o `ler` de cada ferramenta cai no padrao dela.
+      // Gravar na mesma deixaria lixo no armazenamento a parecer definicao.
+      try {
+        JSON.parse(valor);
+      } catch {
+        continue;
+      }
+      dados[chave] = valor;
+    }
+    const quantas = Object.keys(dados).length;
+    if (!quantas) {
+      return { erro: fora ? 'Esse código só tinha o que não se importa.' : 'Esse código não tem definição deste pacote.' };
+    }
+    return { dados, quantas, fora };
+  }
+
+  /** Os pares do armazenamento, tolerando um `localStorage` que nao deixe enumerar. */
+  function paresGuardados() {
+    const pares = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const chave = localStorage.key(i);
+        if (typeof chave === 'string') pares.push([chave, localStorage.getItem(chave)]);
+      }
+    } catch {
+      /* modo anonimo ou armazenamento trancado: devolve o que deu, nunca rebenta o menu. */
+    }
+    return pares;
+  }
+
   // O andar dos paineis do pacote. O CSS de cada um pede `Z_BASE`; `PPX.frente` reparte daqui
   // para cima. Fica abaixo do maximo do CSS (2147483647) para haver para onde subir, e o menu
   // continua acima de tudo: ele e' o controlo, e tem de se poder clicar sempre.
@@ -395,6 +506,37 @@
   };
 
   globalThis.PPX = {
+    /**
+     * O codigo que leva as definicoes deste pacote para outra janela — tudo menos os times.
+     *
+     * Mora no nucleo porque o assunto e' o pacote inteiro: posto numa ferramenta, ela teria de
+     * saber das chaves das outras, e a que nascesse depois ficaria de fora sem ninguem reparar.
+     */
+    exportarTudo: () => exportavel(paresGuardados()),
+
+    /**
+     * Grava um codigo de exportar nesta janela. Devolve o que aconteceu, em texto, para quem
+     * chamou dizer ao utilizador.
+     *
+     * As ferramentas leem o armazenamento quando montam. Gravar depois disso nao as muda — por
+     * isso isto **nao** promete efeito imediato: quem chama manda recarregar a pagina, que e' a
+     * mesma saida que desligar uma ferramenta ja' usa, e pela mesma razao.
+     */
+    importarTudo: (texto) => {
+      const lido = importavel(texto);
+      if (lido.erro) return lido;
+      let gravadas = 0;
+      for (const [chave, valor] of Object.entries(lido.dados)) {
+        try {
+          localStorage.setItem(chave, valor);
+          gravadas++;
+        } catch {
+          /* armazenamento cheio ou trancado: o que entrou fica, e a conta diz quantas foram. */
+        }
+      }
+      return { ...lido, gravadas };
+    },
+
     /** O canto guardado, partilhado por todas as janelinhas do pacote. */
     canto,
 
@@ -646,6 +788,21 @@
     }
     .chave[aria-checked="true"] { background: #1e3326; border-color: #3a5a3f; }
     .chave[aria-checked="true"] span { left: 18px; background: #9ae6a8; }
+    .levar { padding: 6px 10px; border-top: 1px solid #3a4152; }
+    .levar button {
+      background: #2a3243; border: 1px solid #3a4152; color: #e6e9ef; border-radius: 7px;
+      padding: 3px 8px; cursor: pointer; font: inherit;
+    }
+    .levar button:hover { background: #343d52; }
+    .levar button + button { margin-left: 6px; }
+    .levar .conta button { margin-left: 6px; padding: 2px 7px; }
+    .levar textarea {
+      display: none; width: 100%; box-sizing: border-box; margin-top: 6px; height: 64px;
+      background: #11151e; border: 1px solid #3a4152; color: #c9cedb; border-radius: 7px;
+      padding: 5px 7px; font: 11px/1.35 monospace; resize: vertical;
+    }
+    .levar textarea.aberta { display: block; }
+    .levar .conta { margin-top: 5px; color: #6f7789; font-size: 11px; }
     .rodape { padding: 6px 10px; border-top: 1px solid #3a4152; color: #6f7789; }
     .rodape button {
       background: #2a3243; border: 1px solid #3a4152; color: #e6e9ef; border-radius: 7px;
@@ -668,6 +825,12 @@
       <button class="fechar" title="Fechar o menu (Alt+Q)">—</button>
     </div>
     <ul></ul>
+    <div class="levar">
+      <button class="exportar" title="Escreve aqui embaixo o código com as suas definições; copie com Ctrl+C">Exportar tudo</button>
+      <button class="importar" title="Lê o código colado aqui embaixo e grava as definições nesta janela">Aplicar código</button>
+      <textarea class="codigo" placeholder="cole aqui um código e clique em Aplicar código"></textarea>
+      <div class="conta"></div>
+    </div>
     <div class="legenda">
       O botão do meio mostra, esconde ou liga o efeito — e fica assim no próximo F5.
       A chave verde ativa ou desativa a ferramenta inteira nesta janela.
@@ -701,6 +864,39 @@
     gravar(CHAVE_ABERTO, sim);
   };
   menu.querySelector('.fechar').onclick = () => abrir(false);
+
+  // O codigo sai para uma caixa de texto e nao para a area de transferencia: escrever na area de
+  // transferencia pede permissao do navegador, e dentro do LionMultInstance essa permissao nao e'
+  // garantida. Texto a' vista e Ctrl+C funcionam em qualquer janela.
+  const caixaCodigo = menu.querySelector('.codigo');
+  const contaCodigo = menu.querySelector('.conta');
+  menu.querySelector('.exportar').onclick = () => {
+    const feito = globalThis.PPX.exportarTudo();
+    caixaCodigo.value = JSON.stringify(feito);
+    caixaCodigo.classList.add('aberta');
+    caixaCodigo.select?.();
+    contaCodigo.textContent = feito.quantas
+      ? `${feito.quantas} ${feito.quantas === 1 ? 'definição' : 'definições'} — copie com Ctrl+C. Os times ficam de fora.`
+      : 'Não há nada guardado para exportar ainda.';
+  };
+
+  menu.querySelector('.importar').onclick = () => {
+    const feito = globalThis.PPX.importarTudo(caixaCodigo.value);
+    contaCodigo.textContent = '';
+    if (feito.erro) {
+      contaCodigo.textContent = feito.erro;
+      return;
+    }
+    // As ferramentas leem o armazenamento quando montam: o que acabou de entrar so' vale depois do
+    // F5. Prometer efeito imediato seria mentir, e mentir aqui custa caro — o utilizador acharia
+    // que o codigo nao entrou e colaria outra vez.
+    const sobra = feito.fora ? ` ${feito.fora} ficaram de fora (times e fila).` : '';
+    contaCodigo.textContent = `${feito.gravadas} ${feito.gravadas === 1 ? 'definição gravada' : 'definições gravadas'}.${sobra} Recarregue a página para valerem.`;
+    const botao = document.createElement('button');
+    botao.textContent = 'recarregar agora';
+    botao.onclick = () => location.reload();
+    contaCodigo.appendChild(botao);
+  };
 
   function desenhar() {
     lista.textContent = '';

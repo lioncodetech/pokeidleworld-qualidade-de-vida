@@ -356,6 +356,60 @@ Escrever por cima apagaria os times guardados, e há um teste só para isso.
 Esconder todos continua sendo do núcleo: **Alt+Z** some com tudo, **Alt+X** traz de volta o que
 estava à vista. Dois donos para a mesma coisa discordam mais cedo ou mais tarde.
 
+## Exportar tudo (menu Alt+Q)
+
+O menu do pacote tem um botão **Exportar tudo**: ele escreve numa caixa de texto, em JSON, tudo o
+que o pacote guardou nesta janela — loja, ciclo, caçadas, escada, agenda, arrumações, que
+ferramentas estão ligadas, onde cada painel está. Copie com Ctrl+C.
+
+**Os times ficam de fora**, de propósito. Um time é feito dos pokémon *daquela* conta; levado para
+outra janela ele aponta para bichos que lá não existem.
+
+Duas outras chaves também não saem, e por motivo diferente — não são configuração:
+
+- **a vez** (`:vez`) é a fila a correr *agora*. Quem a levasse para uma janela nova entrava com a
+  vez de outra já tomada, e **toda** automação ficaria à espera de alguém que não está lá;
+- **o sinal do arrumar** (`:arrumar:sinal`) é um recado de uma janela para as outras, vale por
+  instantes.
+
+O que não tem o prefixo `lioncode:pokeidleworld:` nunca entra: nem a sessão do jogo, nem outras
+extensões, nem o `lioncode:gym:tarefa`, que é tarefa a meio.
+
+A varredura é **por prefixo, não por lista escrita à mão**. É o que faz uma ferramenta futura
+entrar no código sozinha: lista à mão envelhece calada — a ferramenta nova guarda a chave dela,
+ninguém se lembra de a juntar, e você descobre que perdeu a configuração quando já trocou de
+janela.
+
+O código sai para uma caixa à vista e não para a área de transferência: escrever nela pede
+permissão do navegador, e dentro do LionMultInstance essa permissão não é garantida.
+
+### Aplicar código
+
+Ao lado fica **Aplicar código**: cole um código na caixa e ele grava essas definições nesta
+janela. A conta diz quantas entraram e quantas ficaram de fora.
+
+**A peneira do aplicar é a mesma do exportar, e isso é de propósito.** O código colado não é de
+confiança: pode vir de uma versão antiga que ainda exportava os times, de alguém que o editou à
+mão, ou de outro pacote. Confiar em que "o exportar já tirou" seria confiar em software que não
+está a correr aqui. Então, ao entrar, também se recusa:
+
+- os **times** — os seus não são substituídos, nem que o código traga uns;
+- a **vez** e o **sinal do arrumar**;
+- tudo sem o prefixo do pacote — um código com a sessão do jogo lá dentro não escreve nada;
+- valor que não seja texto, ou que não seja JSON válido: nenhuma ferramenta o leria, e gravá-lo
+  deixaria lixo no armazenamento com cara de configuração.
+
+Aceita tanto o objeto inteiro do exportar como só o mapa de chaves — quem cola texto cola o que
+tem à mão.
+
+**Só vale depois do F5**, e o botão diz isso com um *recarregar agora* ao lado. As ferramentas leem
+o armazenamento quando montam; prometer efeito imediato seria mentir, e você colaria o código
+outra vez a achar que não entrou. É a mesma saída que desligar uma ferramenta já usa, pela mesma
+razão.
+
+Importar é ganhar definições, não trocar a janela por outra: o que já estava lá e o código não
+mencionou fica intacto.
+
 ## A Nurse Joy, e por que ela é de todos
 
 **Equipe caída não caça, não viaja e o jogo não diz nada.** Ele põe um aviso na tela e

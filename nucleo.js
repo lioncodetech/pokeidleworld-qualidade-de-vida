@@ -797,11 +797,13 @@
     .levar button + button { margin-left: 6px; }
     .levar .conta button { margin-left: 6px; padding: 2px 7px; }
     .levar textarea {
-      display: none; width: 100%; box-sizing: border-box; margin-top: 6px; height: 64px;
+      /* Sempre a' vista, e nao so' depois de exportar: o Aplicar precisa de um sitio onde colar.
+         Escondida ate' ao primeiro Exportar, a unica forma de a abrir era gerar o proprio codigo
+         por cima do que se queria colar — o importar ficava inutilizavel. */
+      width: 100%; box-sizing: border-box; margin-top: 6px; height: 64px;
       background: #11151e; border: 1px solid #3a4152; color: #c9cedb; border-radius: 7px;
       padding: 5px 7px; font: 11px/1.35 monospace; resize: vertical;
     }
-    .levar textarea.aberta { display: block; }
     .levar .conta { margin-top: 5px; color: #6f7789; font-size: 11px; }
     .rodape { padding: 6px 10px; border-top: 1px solid #3a4152; color: #6f7789; }
     .rodape button {
@@ -873,7 +875,6 @@
   menu.querySelector('.exportar').onclick = () => {
     const feito = globalThis.PPX.exportarTudo();
     caixaCodigo.value = JSON.stringify(feito);
-    caixaCodigo.classList.add('aberta');
     caixaCodigo.select?.();
     contaCodigo.textContent = feito.quantas
       ? `${feito.quantas} ${feito.quantas === 1 ? 'definição' : 'definições'} — copie com Ctrl+C. Os times ficam de fora.`

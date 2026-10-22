@@ -229,3 +229,15 @@ test('valor que não é texto não entra', () => {
   assert.ok(r.erro, 'nada aproveitável nesse código');
   assert.equal(n.loja[P + 'escada'], undefined);
 });
+
+test('a caixa de colar está à vista antes de qualquer clique', async () => {
+  // Publicado assim na 1.5.0 e corrigido na 1.5.1: a caixa nascia com `display: none` e só o
+  // Exportar a abria. O botão Aplicar existia, mas a única forma de revelar onde colar era gerar
+  // o próprio código POR CIMA do que se queria colar — ou seja, o importar não se podia usar.
+  const { ler } = await import('./nucleo-de-mentira.mjs');
+  const fonte = ler('nucleo.js');
+  const bloco = fonte.slice(fonte.indexOf('.levar textarea {'));
+  const regra = bloco.slice(0, bloco.indexOf('}'));
+  assert.doesNotMatch(regra, /display:\s*none/, 'a caixa de colar não pode nascer escondida');
+  assert.doesNotMatch(fonte, /caixaCodigo\.classList\.add\('aberta'\)/);
+});

@@ -386,7 +386,9 @@ permissão do navegador, e dentro do LionMultInstance essa permissão não é ga
 ### Aplicar código
 
 Ao lado fica **Aplicar código**: cole um código na caixa e ele grava essas definições nesta
-janela. A conta diz quantas entraram e quantas ficaram de fora.
+janela. A caixa está sempre à vista — na 1.5.0 ela nascia escondida e só o Exportar a
+abria, o que tornava o Aplicar inutilizável: a única forma de revelar onde colar era gerar o
+próprio código por cima do que se queria colar. Corrigido na 1.5.1. A conta diz quantas entraram e quantas ficaram de fora.
 
 **A peneira do aplicar é a mesma do exportar, e isso é de propósito.** O código colado não é de
 confiança: pode vir de uma versão antiga que ainda exportava os times, de alguém que o editou à

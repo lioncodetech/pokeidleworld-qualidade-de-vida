@@ -118,6 +118,118 @@
     return { dados, quantas, fora };
   }
 
+  // ------------------------------------------------------------- os rotulos do jogo, em 3 idiomas
+  //
+  // O jogo tem ingles, portugues e espanhol, e o pacote inteiro procurava SO' o texto portugues:
+  // `porTitulo('Voltar para Cerulean')`, `/^Fechar$/`, `/Conversar/`. Numa conta em ingles nada
+  // disso existe no DOM, e o sintoma era o pior possivel — a ferramenta dizia "Nao achei o botao
+  // de voltar para Cerulean" e o utilizador nao tinha como saber que o problema era o idioma.
+  //
+  // As tres formas de cada rotulo nao foram adivinhadas: saem do dicionario do proprio jogo, no
+  // pacote publico dele (chunk do Next.js), lido em 22/10/2026. A chave do jogo vai no comentario
+  // de cada linha para a origem ser conferivel.
+  const ROTULOS = {
+    cidade: ['Back to Cerulean', 'Voltar para Cerulean', 'Volver a Cerulean'], // home
+    mapa: ['Map', 'Mapa'], // map
+    inventario: ['Inventory', 'Inventário', 'Inventario'], // inventory
+    conversar: ['Talk', 'Conversar', 'Hablar'], // talk
+    fechar: ['Close', 'Fechar', 'Cerrar'], // close
+    deposito: ['Open Depot', 'Abrir Depósito', 'Abrir Depot'], // openDepot
+    mercado: ['Open Market', 'Abrir Mercado', 'Abrir Market'], // openMarket
+    curarEquipe: ['Heal team', 'Curar equipe', 'Curar equipo'], // healTeam
+    selecionarTudo: ['Select all', 'Selecionar tudo', 'Seleccionar todo'], // selectAll
+    vender: ['Sell', 'Vender'], // sellBtn
+    comprar: ['Buy', 'Comprar', 'Adquirir'], // buyBtn
+    itens: ['Items', 'Itens', 'Objetos'], // tabItems
+    familia: ['Family', 'Família', 'Familia'], // familyLine
+    usarMaquina: ['Use machine', 'Usar máquina'], // machine
+    abaPokemon: ['Pokémon'], // tabPokemon
+    cancelar: ['Cancel', 'Cancelar'], // cancel
+    confirmar: ['Confirm', 'Confirmar'], // confirm
+    venderMesmoAssim: ['Sell anyway', 'Vender mesmo assim', 'Vender de todos modos'], // confirmSellOk
+    shopping: ['Shopping Mall', 'Shopping'], // locationMall
+    mercadoLocal: ['Market', 'Mercado'], // tabMarket
+    cidadeNome: ['Cerulean'], // ceruleanBold
+    itemGenerico: ['Item', 'Objeto'], // itemFallback: "Item #{{id}}"
+    viajarPara: ['Travel to', 'Viajar a', 'Viajar para'], // markerTitleTravel: "Viajar para {{name}}"
+    // As grades que nunca se vendem. O jogo escreve-as em duas formas: a do filtro da loja
+    // (`labelLegendary`, feminina em portugues) e a da linha do pokemon (`rarityLegendary`,
+    // masculina). Faltar uma delas e' vender um lendario por engano, por isso estao as duas.
+    gradeLendaria: ['Legendary', 'Lendária', 'Lendário'], // labelLegendary + rarityLegendary
+    gradeMitica: ['Mythic', 'Mítica', 'Mítico'], // labelMythic + rarityMythic
+    gradeAncia: ['Ancient', 'Anciã', 'Ancião', 'Anciana', 'Anciano'], // labelAncient + rarityAncient
+    gradeDivina: ['Divine', 'Divina', 'Divino'], // labelDivine + rarityDivine
+  };
+
+  /**
+   * Compara texto do jogo sem se importar com acentos, caixa, emoji ou espaco a mais.
+   *
+   * O jogo poe emoji dentro do proprio rotulo — `openDepot` e' "📦 Open Depot" numa lingua e
+   * "Abrir Depot" noutra — e compara-lo cru faria a mesma chave falhar por causa de um simbolo.
+   */
+  const limparRotulo = (t) =>
+    String(t || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^\p{L}\p{N} ]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+  /** As formas conhecidas de um rotulo, ja' limpas. Nome desconhecido devolve lista vazia. */
+  const formasDe = (nome) => (ROTULOS[nome] || []).map(limparRotulo);
+
+  /**
+   * O texto e' este rotulo, em qualquer das linguas?
+   *
+   * Igualdade e nao "contem": "Sell" dentro de "Sell stones" e' outro botao, e clicar no errado
+   * numa ferramenta que vende e' o tipo de engano que nao se desfaz.
+   */
+  const eRotulo = (nome, texto) => {
+    const t = limparRotulo(texto);
+    return formasDe(nome).includes(t);
+  };
+
+  /** O mesmo, mas para quem so' tem um prefixo: "Vender (73)", "Família: Pikachu". */
+  const comecaComRotulo = (nome, texto) => {
+    const t = limparRotulo(texto);
+    return formasDe(nome).some((f) => t === f || t.startsWith(f + ' '));
+  };
+
+  /**
+   * O texto CONTEM alguma forma deste rotulo?
+   *
+   * Para texto corrido, como a linha de meta do pokemon ("Nv 72 · IV 180/192 · Lendário"), em que
+   * o rotulo e' uma palavra no meio. Exige fronteira de palavra: "Divino" nao se acha dentro de
+   * "Adivinho".
+   */
+  const contemRotulo = (nome, texto) => {
+    const t = limparRotulo(texto);
+    if (t === '') return false;
+    return formasDe(nome).some((f) => t === f || new RegExp(`(^| )${f}( |$)`).test(t));
+  };
+
+  /**
+   * O botao do jogo com este rotulo, em qualquer das linguas.
+   *
+   * Uma porta e nao quatro: cada ferramenta tinha o seu `porTitulo` com o texto portugues dentro,
+   * e quatro copias do mesmo rotulo divergem no primeiro que o jogo mudar.
+   *
+   * - `texto`: procura pelo texto do botao em vez do `title`;
+   * - `comeca`: aceita o rotulo como inicio — "Vender (73)", "Família: Pikachu";
+   * - `raiz`: limita a procura a uma janela do jogo, que e' o que evita clicar no botao certo da
+   *   caixa errada.
+   */
+  function botaoPorRotulo(nome, { texto = false, comeca = false, raiz = null } = {}) {
+    const onde = raiz || document;
+    const casa = comeca ? comecaComRotulo : eRotulo;
+    return (
+      [...onde.querySelectorAll('button')].find((b) =>
+        casa(nome, texto ? b.textContent : b.title),
+      ) || null
+    );
+  }
+
   /** Os pares do armazenamento, tolerando um `localStorage` que nao deixe enumerar. */
   function paresGuardados() {
     const pares = [];
@@ -512,6 +624,20 @@
      * Mora no nucleo porque o assunto e' o pacote inteiro: posto numa ferramenta, ela teria de
      * saber das chaves das outras, e a que nascesse depois ficaria de fora sem ninguem reparar.
      */
+    /**
+     * Os rotulos do jogo nas tres linguas que ele tem, e as comparacoes que os usam.
+     *
+     * Mora no nucleo por ser do pacote inteiro: cada ferramenta tinha a sua copia do texto
+     * portugues, e uma tabela por ferramenta diverge no primeiro rotulo que o jogo mudar.
+     */
+    rotulos: { nomes: () => Object.keys(ROTULOS), formas: (n) => [...(ROTULOS[n] || [])] },
+    limparRotulo,
+    formasLimpas: formasDe,
+    eRotulo,
+    comecaComRotulo,
+    contemRotulo,
+    botaoPorRotulo,
+
     exportarTudo: () => exportavel(paresGuardados()),
 
     /**

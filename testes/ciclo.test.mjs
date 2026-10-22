@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { casadoresDeRotulo } from './nucleo-de-mentira.mjs';
 
 const fonte = readFileSync(new URL('../ciclo.js', import.meta.url), 'utf8');
 
@@ -37,11 +38,39 @@ function no(cls, texto = '', extra = {}) {
   };
 }
 
+// O jogo tem seletor de idioma, e a mesma cena tem de dar o mesmo resultado em qualquer um.
+// Os textos sairam do dicionario que o proprio jogo publica.
+const EM = {
+  pt: {
+    conversar: 'Conversar',
+    maquina: 'Usar máquina',
+    inventario: 'Inventário',
+    mapa: 'Mapa',
+    viajar: 'Viajar para',
+  },
+  en: {
+    conversar: 'Talk',
+    maquina: 'Use machine',
+    inventario: 'Inventory',
+    mapa: 'Map',
+    viajar: 'Travel to',
+  },
+};
+
 /**
  * @param parede quantos passos o mapa aceita antes de deixar de rolar
  * @param markEm indice do NPC que se apresenta como Mark; -1 para nenhum
+ * @param lingua em que lingua o jogo esta': 'pt' ou 'en'
  */
-function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Route 1' } = {}) {
+function montar({
+  parede = 99,
+  markEm = 0,
+  npcs = 3,
+  estoqueDe = {},
+  loc = 'Route 1',
+  lingua = 'pt',
+} = {}) {
+  const L = EM[lingua];
   let passosDados = 0; // passos que tiveram efeito
   let teclasDadas = 0; // teclas enviadas, com ou sem efeito — e' isto que revela a insistencia
   let deslocamento = 0;
@@ -50,7 +79,7 @@ function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Rout
 
   const placas = [];
   for (let i = 0; i < npcs; i += 1) {
-    const b = no('npc-plate-btn', 'Conversar');
+    const b = no('npc-plate-btn', L.conversar);
     b.x = 100 + i * 50;
     b.y = 100;
     b.idx = i;
@@ -61,7 +90,7 @@ function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Rout
     placas.push(b);
   }
   // uma "Usar máquina" no meio: a slot machine, em que nunca se pode clicar por engano
-  const slot = no('npc-plate-btn', 'Usar máquina');
+  const slot = no('npc-plate-btn', L.maquina);
   slot.x = 120;
   slot.y = 100;
   slot.aoClicar = () => {
@@ -82,13 +111,13 @@ function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Rout
     return s;
   });
 
-  const btInventario = no('', 'Inventário');
-  btInventario.title = 'Inventário';
-  const btMapa = no('', 'Mapa');
-  btMapa.title = 'Mapa';
+  const btInventario = no('', L.inventario);
+  btInventario.title = L.inventario;
+  const btMapa = no('', L.mapa);
+  btMapa.title = L.mapa;
   const viagens = [];
   const marcador = no('hunt-marker', loc);
-  marcador.title = `Viajar para ${loc}`;
+  marcador.title = `${L.viajar} ${loc}`;
   marcador.aoClicar = () => viagens.push(loc);
 
   const doc = {
@@ -112,6 +141,9 @@ function montar({ parede = 99, markEm = 0, npcs = 3, estoqueDe = {}, loc = 'Rout
   };
 
   const PPX = { modulo: (meta, fn) => fn(), vez: { pedir: async () => () => {} } };
+  // Os casadores de rotulo do nucleo DE VERDADE: sem eles este fake caia sempre para o texto
+  // portugues escrito a mao, e o caminho que o jogo em ingles usa ficava sem guarda.
+  Object.assign(PPX, casadoresDeRotulo({ querySelectorAll: (s) => doc.querySelectorAll(s) }));
   globalThis.PPX = PPX;
 
   const mod = { exports: {} };
@@ -253,4 +285,32 @@ test('nao viaja para lugar nenhum se nao achar a cacada no mapa', async () => {
   const p = montar({ loc: 'Route 1' });
   assert.equal(await p.api.voltarPara('Lugar Que Nao Existe'), false);
   assert.deepEqual(p.viagens, [], 'melhor ficar parado do que viajar para o lugar errado');
+});
+
+// --- o jogo em ingles ---------------------------------------------------------------------------
+//
+// Era aqui que doia: as ferramentas casavam "Inventário", "Mapa" e "Conversar" escritos a mao, e
+// com o jogo em ingles elas nao achavam botao nenhum e desistiam caladas.
+
+test('em ingles: acha o Mark pelas placas "Talk"', async () => {
+  const p = montar({ markEm: 2, lingua: 'en' });
+  assert.equal(await p.api.acharMark(), true);
+  assert.ok(p.falados.includes(2));
+});
+
+test('em ingles: nunca clica na "Use machine"', async () => {
+  const p = montar({ markEm: 1, lingua: 'en' });
+  await p.api.acharMark();
+  assert.ok(true);
+});
+
+test('em ingles: volta para a cacada pelo mapa', async () => {
+  const p = montar({ loc: 'Route 1', lingua: 'en' });
+  assert.equal(await p.api.voltarPara('Route 1'), true);
+  assert.deepEqual(p.viagens, ['Route 1']);
+});
+
+test('em ingles: le o estoque pelo botao "Inventory"', async () => {
+  const p = montar({ estoqueDe: { 'Poké Ball': 42 }, lingua: 'en' });
+  assert.equal(await p.api.estoque('Poké Ball'), 42);
 });

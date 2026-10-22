@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { casadoresDeRotulo } from './nucleo-de-mentira.mjs';
 
 const fonte = readFileSync(new URL('../cacadas.js', import.meta.url), 'utf8');
 
@@ -102,6 +103,9 @@ function montar({
     anotar: () => {},
     controlar: () => {},
   };
+  // Os casadores de rotulo do nucleo DE VERDADE: sem eles este fake caia sempre para o texto
+  // portugues escrito a mao, e o caminho que o jogo em ingles usa ficava sem guarda.
+  Object.assign(PPX, casadoresDeRotulo({ querySelectorAll: (s) => doc.querySelectorAll(s) }));
   globalThis.PPX = PPX;
 
   const tloc = no('phud-tloc', '');

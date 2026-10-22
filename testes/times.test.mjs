@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { casadoresDeRotulo } from './nucleo-de-mentira.mjs';
 
 const fonte = readFileSync(new URL('../times.js', import.meta.url), 'utf8');
 
@@ -15,6 +16,29 @@ const fonte = readFileSync(new URL('../times.js', import.meta.url), 'utf8');
  * Um Deposito de mentira que se comporta como o verdadeiro: as linhas sao refeitas a cada
  * leitura (como o React faz) e o Box inteiro fica travado enquanto a equipe tem seis.
  */
+// O jogo tem seletor de idioma, e a mesma cena tem de dar o mesmo resultado em qualquer um.
+// Os textos sairam do dicionario que o proprio jogo publica.
+const EM = {
+  pt: {
+    familiaItens: '👨‍👩‍👧 Família: Itens',
+    familiaPokemon: '👨‍👩‍👧 Família: Pokémon',
+    cidade: 'Voltar para Cerulean',
+    mapa: 'Mapa',
+    curar: '🩹 Curar equipe',
+    depot: 'Abrir Depot',
+    viajar: 'Viajar para',
+  },
+  en: {
+    familiaItens: '👨‍👩‍👧 Family: Items',
+    familiaPokemon: '👨‍👩‍👧 Family: Pokémon',
+    cidade: 'Back to Cerulean',
+    mapa: 'Map',
+    curar: '🩹 Heal team',
+    depot: '📦 Open Depot',
+    viajar: 'Travel to',
+  },
+};
+
 function deposito({
   equipe = [],
   box = [],
@@ -30,7 +54,9 @@ function deposito({
   // Chamado sempre que alguem vem do Box para a equipe: e' por aqui que o teste faz chegar um
   // pokemon caido, que e' o caso que a cura so'-antes nao cobriria.
   aoTrazer = () => {},
+  lingua = 'pt',
 }) {
+  const L = EM[lingua];
   const est = {
     equipe: [...equipe],
     box: [...box],
@@ -89,11 +115,23 @@ function deposito({
     },
   };
 
+  // A familia tem DUAS abas. Ficar com a primeira que comece por "Família:" poria os itens
+  // protegidos na aba dos pokemon.
+  const abaFamPoke = {
+    get className() {
+      return `nsh-tab${abaAtiva === 'famPokemon' ? ' on' : ''}`;
+    },
+    textContent: L.familiaPokemon,
+    click() {
+      if (!semAba) abaAtiva = 'famPokemon';
+    },
+  };
+
   const abaItens = {
     get className() {
       return `nsh-tab${abaAtiva === 'itens' ? ' on' : ''}`;
     },
-    textContent: '👨‍👩‍👧 Família: Itens',
+    textContent: L.familiaItens,
     click() {
       if (!semAba) abaAtiva = 'itens';
     },
@@ -166,7 +204,7 @@ function deposito({
         return abaAtiva === 'itens'
           ? (familiaEstrutura ? [] : [colItens('itens'), colItens('familiaItens')])
           : [col('equipe'), col('box')];
-      if (sel === '.nsh-tab') return semAba ? [] : [aba, abaItens];
+      if (sel === '.nsh-tab') return semAba ? [] : [aba, abaFamPoke, abaItens];
       if (sel === 'img[alt]' && abaAtiva === 'itens') {
         const cols = [colItens('itens'), colItens('familiaItens')];
         return itensSoTexto ? [] : cols.flatMap((c) => c.querySelectorAll('img[alt]'));
@@ -237,6 +275,11 @@ function montar({
   // transformava "demorou" em "nao abriu" — foi o que aconteceu na conta real.
   demoraDepot = 0,
   noMapa = ['Persian'],
+  // Em que lingua o jogo esta': 'pt' ou 'en'.
+  lingua = 'pt',
+  // Troca o verbo do marcador do mapa por outro: e' assim que se mede que a ferramenta confere o
+  // verbo, e nao so' o nome do destino que vem depois dele.
+  verboDoMarcador = null,
   // A caixa "manter a ordem" do painel, como ficou guardada da ultima vez.
   ordem = false,
   // O clique no marcador nao leva a lado nenhum: e' assim que o jogo recusa uma viagem.
@@ -271,7 +314,9 @@ function montar({
     });
   // O fake avisa quando alguem vem do Box, e e' nesse instante que o HUD ganha um caido: e' o
   // unico jeito de distinguir "curou antes" de "curou a equipe que vai mesmo viajar".
+  const L = EM[lingua];
   const depo = deposito({
+    lingua,
     ...dep,
     aoTrazer: () => {
       if (caiDoBox) vivos = Math.max(0, vivos - 1);
@@ -285,13 +330,13 @@ function montar({
   // A cidade: a placa "Abrir Depot" e o botao de voltar a Cerulean. Em aba oculta o jogo para de
   // desenhar e as placas somem — e' o que `temPlaca: false` simula.
   const btCerulean = {
-    title: 'Voltar para Cerulean',
+    title: L.cidade,
     textContent: '',
     click() {
       local = 'Cerulean';
     },
   };
-  const btMapa = { title: 'Mapa', textContent: '', click() {} };
+  const btMapa = { title: L.mapa, textContent: '', click() {} };
 
   // --- a Nurse Joy, e a vida da equipe no HUD -------------------------------------------------
   let escondida = oculto;
@@ -310,7 +355,7 @@ function montar({
 
   let dialogo = null;
   const btCurar = {
-    textContent: '🩹 Curar equipe',
+    textContent: L.curar,
     click() {
       curas += 1;
       if (!curaFalha) vivos = 6;
@@ -338,7 +383,7 @@ function montar({
   };
   const placaDepot = {
     className: 'npc-plate-btn',
-    textContent: 'Abrir Depot',
+    textContent: L.depot,
     click() {
       abertas.push('depot');
       if (!placaAbre) return;
@@ -354,7 +399,7 @@ function montar({
   };
   const marcadores = noMapa.map((nome) => ({
     className: 'hunt-marker',
-    title: `Viajar para ${nome}`,
+    title: `${verboDoMarcador || L.viajar} ${nome}`,
     textContent: nome,
     click() {
       viagens.push(nome);
@@ -405,6 +450,9 @@ function montar({
       controles[id] = fn;
     },
   };
+  // Os casadores de rotulo do nucleo DE VERDADE: sem eles este fake caia sempre para o texto
+  // portugues escrito a mao, e o caminho que o jogo em ingles usa ficava sem guarda.
+  Object.assign(PPX, casadoresDeRotulo({ querySelectorAll: (s) => doc.querySelectorAll(s) }));
   globalThis.PPX = PPX;
 
   const doc = {
@@ -1471,4 +1519,65 @@ test('caiu com a aba escondida: tenta de novo quando ela volta', async () => {
   p.bater();
   assert.ok(await ate(() => p.curas() === 1), 'nao curou depois de a aba voltar');
   assert.equal(p.caidos(), 0);
+});
+
+// --- o jogo em ingles ---------------------------------------------------------------------------
+//
+// Era aqui que doia: guardar um time em Cerulean acabava num `porTitulo('Voltar para Cerulean')`
+// que, com o jogo em ingles, nao achava botao nenhum — e a ferramenta desistia calada. Foi este o
+// defeito "estou tentando criar um time novo e nao esta guardando".
+
+test('em ingles: guarda a equipe de agora', async () => {
+  const p = montar({ dep: { equipe: SEIS, box: BOX }, lingua: 'en' });
+  assert.match(await p.api.salvarTime('hunt'), /Charizard/);
+  assert.deepEqual(p.api.cfg.times.hunt, GUARDADO);
+});
+
+test('em ingles: guardar abre o Deposito e devolve o jogador a cacada', async () => {
+  const p = montar({
+    dep: { equipe: SEIS, box: BOX, semJanela: true },
+    onde: 'Persian',
+    lingua: 'en',
+  });
+  assert.match(await p.api.salvarTime('hunt'), /guardado/);
+  assert.deepEqual(p.abertas, ['depot']);
+  assert.deepEqual(p.viagens, ['Persian'], 'voltou pelo botao "Map" e pelo marcador em ingles');
+});
+
+test('em ingles: monta o time guardado', async () => {
+  const p = montar({ dep: { equipe: SEIS, box: BOX }, lingua: 'en' });
+  p.api.cfg.times.gym = [...GUARDADO.slice(0, 5), semNv(SCYTHER)];
+  assert.match(await p.api.montarTime('gym'), /montado/);
+});
+
+test('em ingles: a aba "Family: Items" e a que guarda os protegidos', async () => {
+  const protegidos = [{ nome: 'Devoted Token', qtd: 532 }];
+  const comuns = [{ nome: 'Bone', qtd: 18 }];
+  const p = montar({
+    dep: { equipe: SEIS, box: BOX, itens: [...protegidos, ...comuns] },
+    lingua: 'en',
+  });
+  const r = await p.api.protegerItensAqui(() => {});
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(p.dep.est.familiaItens, protegidos);
+});
+
+test('marcador com outro verbo nao e viagem: confere o verbo, nao so o destino', async () => {
+  // O mapa tem marcadores que nao sao viagem. Casar so' o fim do titulo ("… Persian") faria a
+  // ferramenta clicar em qualquer coisa que termine com o nome da caçada.
+  const p = montar({
+    dep: { equipe: SEIS, box: BOX, semJanela: true },
+    onde: 'Persian',
+    verboDoMarcador: 'Comprar em',
+  });
+  await p.api.salvarTime('caçada');
+  assert.deepEqual(p.viagens, [], 'melhor ficar parado do que clicar no marcador errado');
+});
+
+test('a aba dos itens da familia nao se confunde com a dos pokemon', async () => {
+  const protegidos = [{ nome: 'Devoted Token', qtd: 532 }];
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: [...protegidos] } });
+  const r = await p.api.protegerItensAqui(() => {});
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(p.dep.est.familiaItens, protegidos, 'foi para a aba dos itens, nao a dos pokemon');
 });

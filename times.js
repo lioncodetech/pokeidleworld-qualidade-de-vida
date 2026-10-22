@@ -161,12 +161,29 @@ PPX.modulo(
       ['90127', 'Legendary Golden Ticket'],
     ]);
 
+    /** A aba e' "Família: Itens" / "Family: Items" / "Familia: Objetos". */
+    const eAbaFamiliaItens = (texto) => {
+      const ppx = globalThis.PPX;
+      if (!ppx?.limparRotulo) return /Fam[ií]lia:\s*Itens/i.test(texto || '');
+      const t = ppx.limparRotulo(texto);
+      return (
+        ppx.formasLimpas('familia').some((f) => t.startsWith(f + ' ')) &&
+        ppx.formasLimpas('itens').some((f) => t === f || t.endsWith(' ' + f))
+      );
+    };
+
+    /** Item sem nome proprio: "Item #42" / "Objeto #42". */
+    const temItemGenerico = (texto) => {
+      const ppx = globalThis.PPX;
+      if (!ppx?.limparRotulo) return /\bItem\s*#\s*\d+\b/i.test(texto || '');
+      const t = ppx.limparRotulo(texto);
+      return ppx.formasLimpas('itemGenerico').some((f) => new RegExp('\b' + f + ' \d+\b').test(t));
+    };
+
     async function abaFamiliaItens() {
       const w = janela();
       if (!w) return false;
-      const aba = [...w.querySelectorAll('.nsh-tab')].find((b) =>
-        /Fam[ií]lia:\s*Itens/i.test(b.textContent || ''),
-      );
+      const aba = [...w.querySelectorAll('.nsh-tab')].find((b) => eAbaFamiliaItens(b.textContent));
       if (!aba) return false;
       if (!/\bon\b/.test(aba.className)) {
         aba.click();
@@ -228,7 +245,7 @@ PPX.modulo(
         let no = seta.parentElement;
         for (let i = 0; no && no !== w && i < 8; i += 1, no = no.parentElement) {
           const nome = nomeDoItem(no);
-          if (nome && (protegido(nome) || /\bItem\s*#\s*\d+\b/i.test(no.textContent || ''))) {
+          if (nome && (protegido(nome) || temItemGenerico(no.textContent))) {
             if (!linhas.some((l) => l === no || nomeDoItem(l) === nomeDoItem(no))) linhas.push(no);
             break;
           }
@@ -454,8 +471,35 @@ PPX.modulo(
     // pacote pode estar desligada sozinha, e depender de outra para voltar deixaria o jogador
     // plantado em Cerulean quando ela estivesse fora.
 
-    const botoes = () => [...document.querySelectorAll('button')];
-    const porTitulo = (t) => botoes().find((b) => (b.title || '').trim() === t);
+
+    /**
+     * Procura um botao do jogo pelo rotulo, nas tres linguas que o jogo tem.
+     *
+     * O `antigo` e' o texto portugues de antes e so' vale com um nucleo velho, que nao conhece
+     * rotulos — sem ele, atualizar o pacote sem atualizar o nucleo partiria tudo de uma vez.
+     */
+    /**
+     * O titulo do marcador do mapa e' "Viajar para X" / "Travel to X": confere o verbo pelo
+     * rotulo e o destino pelo nome, que o jogo nao traduz.
+     */
+    const viajaPara = (titulo, destino) => {
+      const t = String(titulo || '').trim();
+      if (!t.endsWith(destino)) return false;
+      const verbo = t.slice(0, t.length - destino.length).trim();
+      const ppx = globalThis.PPX;
+      return ppx?.eRotulo ? ppx.eRotulo('viajarPara', verbo) : verbo === 'Viajar para';
+    };
+
+    const porRotulo = (nome, antigo, { texto = false, comeca = false, raiz = null } = {}) => {
+      const ppx = globalThis.PPX;
+      if (ppx?.botaoPorRotulo) return ppx.botaoPorRotulo(nome, { texto, comeca, raiz });
+      const onde = raiz || document;
+      return (
+        [...onde.querySelectorAll('button')].find((b) =>
+          antigo.test((texto ? b.textContent : b.title) || ''),
+        ) || null
+      );
+    };
 
     /** "Nível 270 · Persian" -> "Persian". */
     const local = () => {
@@ -477,7 +521,7 @@ PPX.modulo(
       );
 
     const botaoCurar = () =>
-      [...document.querySelectorAll('button')].find((b) => /Curar equipe/i.test(b.textContent || ''));
+      porRotulo('curarEquipe', /Curar equipe/i, { texto: true });
 
     const fecharDialogo = () => {
       const d = document.querySelector('[class*=npc-dlg]');
@@ -498,7 +542,9 @@ PPX.modulo(
      */
     async function curarNaJoy(aviso = () => {}) {
       const placas = [...document.querySelectorAll('.npc-plate-btn')].filter((b) =>
-        /Conversar/i.test(b.textContent || ''),
+        globalThis.PPX?.eRotulo
+          ? globalThis.PPX.eRotulo('conversar', b.textContent)
+          : /Conversar/i.test(b.textContent || ''),
       );
       if (!placas.length) return false;
       aviso('Passando na Nurse Joy.');
@@ -521,7 +567,7 @@ PPX.modulo(
 
     /** O anuncio que o jogo abre depois do F5 e que segura o mapa inteiro. */
     const fecharAnuncio = async () => {
-      const f = botoes().find((b) => /^Fechar$/i.test((b.textContent || '').trim()));
+      const f = porRotulo('fechar', /^Fechar$/i, { texto: true });
       if (f) {
         f.click();
         await esperar(800);
@@ -547,10 +593,19 @@ PPX.modulo(
       return cond();
     }
 
-    /** Espera as placas da cidade aparecerem e devolve a que diz `re`. */
-    async function placa(re, tentativas = 12) {
+    /**
+     * Espera as placas da cidade aparecerem e devolve a que tem este rotulo.
+     *
+     * As placas nao sao `<button>`, por isso aqui nao serve o `botaoPorRotulo` do nucleo — o que
+     * se reaproveita e' o casamento de rotulo.
+     */
+    async function placa(nome, antigo, tentativas = 12) {
+      const casa = (texto) =>
+        globalThis.PPX?.comecaComRotulo
+          ? globalThis.PPX.comecaComRotulo(nome, texto)
+          : antigo.test(texto || '');
       for (let i = 0; i < tentativas; i += 1) {
-        const p = [...document.querySelectorAll('.npc-plate-btn')].find((b) => re.test(b.textContent || ''));
+        const p = [...document.querySelectorAll('.npc-plate-btn')].find((b) => casa(b.textContent));
         if (p) return p;
         await esperar(700);
       }
@@ -636,12 +691,12 @@ PPX.modulo(
 
     async function viajar(hunt) {
       if (!hunt) return false;
-      const mapa = porTitulo('Mapa');
+      const mapa = porRotulo('mapa', /^Mapa$/);
       if (!mapa) return false;
       mapa.click();
       const marcador = () =>
         [...document.querySelectorAll('.hunt-marker')].find(
-          (m) => (m.title || '') === `Viajar para ${hunt}`,
+          (m) => viajaPara(m.title, hunt),
         );
       // O mapa e' uma lista grande e demora a montar: espera haver marcadores, nao um relogio.
       if (!(await ateQue(() => document.querySelectorAll('.hunt-marker').length > 0, 12000)))
@@ -694,7 +749,7 @@ PPX.modulo(
 
       let volta = null;
       if (daqui !== 'Cerulean') {
-        const bt = porTitulo('Voltar para Cerulean');
+        const bt = porRotulo('cidade', /^Voltar para Cerulean$/);
         if (!bt)
           return { ok: false, motivo: 'Nao achei o botao de voltar para Cerulean.', volta: null };
         aviso(`Saindo de "${daqui}" para o Depósito.`);
@@ -713,7 +768,7 @@ PPX.modulo(
       // custa a viagem toda. So' passa na Joy se houver mesmo alguem caido.
       if (alguemCaido()) await curarNaJoy(aviso);
 
-      const depot = await placa(/Abrir Depot/);
+      const depot = await placa('deposito', /Abrir Depot/);
       if (!depot)
         return {
           ok: false,
@@ -744,10 +799,7 @@ PPX.modulo(
       // ("Depot — Guarda seus itens no depósito") com um botao `.npc-dlg-btn` escrito "Abrir
       // Depósito". Era isto que faltava: a ferramenta clicava na placa, nao via `.dpt-window` e
       // dizia que a janela nao tinha aberto — quando na verdade faltava o segundo clique.
-      const confirmar = () =>
-        [...document.querySelectorAll('button')].find((b) =>
-          /Abrir Dep[oó]sito/i.test(b.textContent || ''),
-        );
+      const confirmar = () => porRotulo('deposito', /Abrir Dep[oó]sito/i, { texto: true });
       if (await ateQue(() => !!confirmar() || !!janela(), 6000)) {
         const bt = confirmar();
         if (bt && !janela()) {
@@ -992,7 +1044,7 @@ PPX.modulo(
       await fecharAnuncio();
 
       if (daqui !== 'Cerulean') {
-        const bt = porTitulo('Voltar para Cerulean');
+        const bt = porRotulo('cidade', /^Voltar para Cerulean$/);
         if (!bt)
           return (
             'Nao achei o botao de voltar para Cerulean. Com a aba do jogo em segundo plano o ' +

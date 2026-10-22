@@ -47,6 +47,49 @@ ferramenta. Duas consequências práticas:
 - **nunca cronometre o que a página já informa.** O tempo de espera da captura é lido do `disabled`
   do botão. Cronometrar seria fixar em código um número que o jogo pode mudar.
 
+## O jogo troca de idioma: nunca case texto escrito à mão
+
+O jogo tem seletor de idioma (inglês, português, espanhol) e **traduz os rótulos dos botões**. As
+ferramentas nasceram casando texto português escrito à mão (`porTitulo('Voltar para Cerulean')`,
+`/Conversar/`, `/^Vender\s*\(/`). Com o jogo em inglês nenhum desses achava botão, e a ferramenta
+**desistia calada** — foi assim que apareceu "estou tentando criar um time novo e não está
+guardando": o Depósito nunca abria porque a volta a Cerulean nunca acontecia.
+
+A regra agora:
+
+- os rótulos vivem **num lugar só**, a tabela `ROTULOS` do `nucleo.js`, com as formas das três
+  línguas. Quem precisa de casar um rótulo pede ao núcleo: `PPX.eRotulo`, `PPX.comecaComRotulo`,
+  `PPX.botaoPorRotulo`, `PPX.limparRotulo`, `PPX.formasLimpas`;
+- as formas **não se adivinham**: saem do dicionário de i18n que o próprio jogo publica no pacote
+  dele (`/_next/static/chunks/`, pedido com cabeçalhos de navegador — sem eles responde 403). O
+  comentário de cada linha da tabela guarda a chave do jogo (`home`, `openDepot`, `tabItems`…),
+  que é por onde se confere outra vez quando o jogo mudar;
+- `limparRotulo` tira emoji, acento, caixa e espaço a mais, porque o jogo põe emoji dentro do
+  próprio rótulo (`📦 Open Depot` numa língua, `Abrir Depot` noutra);
+- `eRotulo` é **igualdade**, não "contém": `Sell` dentro de `Sell stones` é outro botão, e clicar
+  no errado numa ferramenta que vende não se desfaz. Quem só tem prefixo (`Vender (73)`,
+  `Family: Items`) usa `comecaComRotulo`, que exige fronteira de palavra;
+- cada ferramenta mantém o texto português antigo **só como queda**, para o caso de o núcleo não
+  ter carregado. Não é o caminho normal, e os testes não podem medir só ele: o `PPX` de mentira
+  recebe os casadores de verdade (`casadoresDeRotulo` em `testes/nucleo-de-mentira.mjs`), e cada
+  ferramenta tem cenas repetidas **com o jogo em inglês**. Foi uma dessas que encontrou a placa do
+  Depot ainda por converter;
+- as placas de NPC (`.npc-plate-btn`) e as abas (`.nsh-tab`) **não são `<button>`**: ali não serve
+  o `botaoPorRotulo`, reaproveita-se só o casamento de rótulo;
+- **as grades protegidas eram o pior caso.** `PROTEGIDAS` casava `Lendária`/`Mítica`/`Anciã`/
+  `Divina` em texto. Com o jogo em inglês o filtro `Legendary` não era desligado **e** a auditoria
+  não reconhecia o lendário na linha: a ferramenta vendia um lendário. Agora são rótulos
+  (`gradeLendaria`…), e cada um leva **duas** formas por língua, porque o jogo escreve a grade de
+  dois jeitos — a do filtro (`labelLegendary`, feminina em português: "Lendária") e a da linha do
+  pokémon (`rarityLegendary`, masculina: "Lendário"). Faltar uma é vender por engano;
+- a linha de meta é texto corrido ("Nv 72 · IV 180/192 · Lendário"), e para ela existe
+  `PPX.contemRotulo`, que exige fronteira de palavra — "Divino" não se acha dentro de "Adivinho".
+  As mensagens da ferramenta continuam em português mesmo lendo o jogo em inglês: ela fala com o
+  utilizador, não com o jogo;
+- nome próprio não se traduz (`Cerulean`, `Pokémon`, os nomes de item e de caçada). O que se
+  traduz é o verbo em volta: o marcador do mapa é `Viajar para X` / `Travel to X`, e por isso se
+  confere o verbo pelo rótulo e o destino pelo nome.
+
 ## Segundo plano é o caso normal, não a exceção
 
 O utilizador joga em várias janelas ao mesmo tempo, quase todas escondidas. **`setInterval` é

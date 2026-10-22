@@ -36,6 +36,23 @@ PPX.modulo(
       globalThis.PPX?.pausa ? globalThis.PPX.pausa(ms) : new Promise((r) => setTimeout(r, ms));
     const botoes = () => [...document.querySelectorAll('button')];
 
+    // O jogo troca de idioma (en/pt/es). Os rotulos vivem no nucleo; sem ele, portugues.
+    /** O titulo do marcador e' "Viajar para X" / "Travel to X": confere o verbo e o destino. */
+    const viajaPara = (titulo, destino) => {
+      const t = String(titulo).trim();
+      if (!t.endsWith(destino)) return false;
+      const verbo = t.slice(0, t.length - destino.length).trim();
+      const ppx = globalThis.PPX;
+      return ppx?.eRotulo ? ppx.eRotulo('viajarPara', verbo) : verbo === 'Viajar para';
+    };
+    /** O lugar onde estou e' esta cidade? O nome vem traduzido ("Shopping Mall", "Mercado", …). */
+    const eCidade = (nome, aqui) => {
+      const ppx = globalThis.PPX;
+      if (ppx?.eRotulo) return ppx.eRotulo(nome, aqui);
+      const antigo = { shopping: 'Shopping', cidadeNome: 'Cerulean', mercadoLocal: 'Mercado' }[nome];
+      return !!antigo && aqui.toLowerCase() === antigo.toLowerCase();
+    };
+
     /** "Nível 267 · Shopping" -> "Shopping". E' assim que se sabe onde o jogador esta'. */
     const local = () => {
       const t = document.querySelector('.phud-tloc')?.textContent || '';
@@ -124,12 +141,15 @@ PPX.modulo(
       const nada = { ok: false, achou: false, regiao: '', travada: false };
       if (!hunt) return nada;
       await fecharJanela();
-      const mapa = botoes().find((b) => (b.title || '').trim() === 'Mapa');
+      const ppx = globalThis.PPX;
+      const mapa = ppx?.botaoPorRotulo
+        ? ppx.botaoPorRotulo('mapa')
+        : botoes().find((b) => (b.title || '').trim() === 'Mapa');
       if (!mapa) return nada;
       mapa.click();
       const marcador = () =>
         [...document.querySelectorAll('.hunt-marker')].find(
-          (m) => (m.title || '') === `Viajar para ${hunt}` || m.textContent.trim() === hunt,
+          (m) => viajaPara(m.title || '', hunt) || m.textContent.trim() === hunt,
         );
       // O mapa e' uma lista grande e demora a montar: espera haver marcadores, nao um relogio.
       if (!(await ateQue(() => document.querySelectorAll('.hunt-marker').length > 0, 12000)))
@@ -233,12 +253,12 @@ PPX.modulo(
      * Nao se guarda cidade: clicar em "guardar" parado no Shopping encheria a lista de atalhos
      * para ir fazer compras, e isso so' se descobriria depois de uma madrugada sem cacar.
      */
-    const NAO_SAO_CACADA = ['Shopping', 'Cerulean', 'Mercado'];
+    const NAO_SAO_CACADA = ['shopping', 'cidadeNome', 'mercadoLocal'];
 
     function salvar() {
       const aqui = local();
       if (!aqui) return 'Nao consegui ler onde voce esta.';
-      if (NAO_SAO_CACADA.some((n) => aqui.toLowerCase() === n.toLowerCase()))
+      if (NAO_SAO_CACADA.some((n) => eCidade(n, aqui)))
         return `"${aqui}" e' cidade, nao caçada. Nao guardei.`;
       if (cfg.lista.some((c) => c.nome === aqui)) return `"${aqui}" ja esta na lista.`;
       cfg.lista.push({ nome: aqui, time: '' });

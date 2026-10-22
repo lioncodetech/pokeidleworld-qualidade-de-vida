@@ -190,3 +190,28 @@ export function botaoDeMentira() {
   };
   return bt;
 }
+
+/**
+ * Os casadores de rotulo do nucleo DE VERDADE, prontos para entrar no `PPX` de mentira dos
+ * testes de cada ferramenta.
+ *
+ * Porque' assim: as ferramentas pedem o rotulo ao nucleo e so' caem para o texto portugues
+ * quando ele nao esta' lá. Um `PPX` de mentira sem estes casadores testava sempre a queda, e o
+ * caminho que o jogo em ingles usa ficava sem ninguem a olhar.
+ *
+ * `raiz` e' o documento de mentira do teste: o `botaoPorRotulo` do nucleo procura no documento
+ * da pagina, e na banca a pagina e' outra.
+ */
+export function casadoresDeRotulo(raiz) {
+  const { PPX } = montarNucleo();
+  return {
+    limparRotulo: PPX.limparRotulo,
+    formasLimpas: PPX.formasLimpas,
+    eRotulo: PPX.eRotulo,
+    comecaComRotulo: PPX.comecaComRotulo,
+    contemRotulo: PPX.contemRotulo,
+    rotulos: PPX.rotulos,
+    botaoPorRotulo: (nome, opcoes = {}) =>
+      PPX.botaoPorRotulo(nome, { ...opcoes, raiz: opcoes.raiz || raiz }),
+  };
+}

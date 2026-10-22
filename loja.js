@@ -17,7 +17,24 @@ PPX.modulo(
     const MINHA_VEZ = 'loja';
 
     // O que nunca se vende. Nao e' configuravel de proposito: a lista existe para ser chata.
-    const PROTEGIDAS = ['Lendária', 'Mítica', 'Anciã', 'Divina'];
+    // As grades protegidas pelo NOME DO ROTULO, nao pelo texto: o jogo traduz ("Lendária" num
+    // idioma, "Legendary" noutro), e casar texto portugues com o jogo em ingles fazia o filtro
+    // nao desligar E a auditoria nao ver proibido nenhum — ou seja, vendia lendarios.
+    const PROTEGIDAS = ['gradeLendaria', 'gradeMitica', 'gradeAncia', 'gradeDivina'];
+    // Como a ferramenta as escreve nas mensagens dela, que sao em portugues de todo o modo.
+    const NOME_DA_GRADE = {
+      gradeLendaria: 'Lendária',
+      gradeMitica: 'Mítica',
+      gradeAncia: 'Anciã',
+      gradeDivina: 'Divina',
+    };
+    /** Esta grade aparece neste texto corrido? */
+    const gradeNoTexto = (nome, texto) => {
+      const ppx = globalThis.PPX;
+      return ppx?.contemRotulo
+        ? ppx.contemRotulo(nome, texto)
+        : String(texto).includes(NOME_DA_GRADE[nome]);
+    };
     const ITENS_PROTEGIDOS = [
       /^Poke Card Pack$/i, /^Bronze Dimensional Key$/i, /^Devoted Token$/i,
       /^Strange Pheromone$/i, /^Shiny .+ Card$/i, /^Rare Pokemon Picture$/i,
@@ -80,8 +97,22 @@ PPX.modulo(
 
     // --- leitura da loja -------------------------------------------------------------------
 
-    const botoes = () => [...document.querySelectorAll('button')];
-    const porTitulo = (t) => botoes().find((b) => (b.title || '').trim() === t);
+    // O jogo troca de idioma (en/pt/es). Os rotulos vivem no nucleo; o `antigo` so' vale se o
+    // nucleo nao tiver carregado.
+    const porRotulo = (nome, antigo, { texto = false, comeca = false, raiz = null } = {}) => {
+      const ppx = globalThis.PPX;
+      if (ppx?.botaoPorRotulo) return ppx.botaoPorRotulo(nome, { texto, comeca, raiz });
+      const onde = raiz || document;
+      return [...onde.querySelectorAll('button')].find((b) =>
+        antigo.test((texto ? b.textContent : b.title) || ''),
+      );
+    };
+    /** Casa um rotulo com o texto do elemento, em qualquer idioma. */
+    const eRotuloDe = (nome, texto, antigo, comeca = false) => {
+      const ppx = globalThis.PPX;
+      const casa = comeca ? ppx?.comecaComRotulo : ppx?.eRotulo;
+      return casa ? casa(nome, texto) : antigo.test(texto || '');
+    };
     const janela = () => document.querySelector('.mks-window');
 
     /** O saldo em dollars, lido do cabecalho da loja. `null` quando a loja nao esta aberta. */
@@ -91,10 +122,17 @@ PPX.modulo(
       return Number.isFinite(v) ? v : null;
     };
 
+    // Nome interno da aba -> rotulo do nucleo. O nome interno continua em portugues porque
+    // tambem e' o que aparece nos avisos do painel.
+    const ROTULO_DA_ABA = { 'Pokémon': 'abaPokemon', Comprar: 'comprar', Vender: 'vender' };
+
     const abrirAba = async (rotulo) => {
       const j = janela();
       if (!j) return false;
-      const t = [...j.querySelectorAll('.nsh-tab')].find((x) => x.textContent.includes(rotulo));
+      const nome = ROTULO_DA_ABA[rotulo];
+      const t = [...j.querySelectorAll('.nsh-tab')].find((x) =>
+        nome ? eRotuloDe(nome, x.textContent, new RegExp(rotulo), true) : x.textContent.includes(rotulo),
+      );
       if (!t) return false;
       if (!String(t.className).includes('on')) {
         t.click();
@@ -119,7 +157,7 @@ PPX.modulo(
 
     async function abrirInventario() {
       if (janelaInv()) return true;
-      const bt = porTitulo('Inventário');
+      const bt = porRotulo('inventario', /^Inventário$/);
       if (!bt) return false;
       bt.click();
       // Espera a janela existir, nao um relogio: a mochila e' uma lista grande.
@@ -467,7 +505,8 @@ PPX.modulo(
 
     const grade = (linha) => {
       const meta = linha.querySelector('.mks-meta')?.textContent || '';
-      return PROTEGIDAS.find((g) => meta.includes(g)) || '';
+      const achada = PROTEGIDAS.find((g) => gradeNoTexto(g, meta));
+      return achada ? NOME_DA_GRADE[achada] : '';
     };
 
     const marcadas = () =>
@@ -477,9 +516,10 @@ PPX.modulo(
 
     /** Quantos o proprio jogo diz que vai vender, lido do rotulo do botao: "Vender (73) · …". */
     const contagemDoJogo = () => {
-      const b = [...(janela()?.querySelectorAll('button') || [])].find((x) =>
-        /^Vender\s*\(/.test((x.textContent || '').trim()),
-      );
+      const b = [...(janela()?.querySelectorAll('button') || [])].find((x) => {
+        const t = (x.textContent || '').trim();
+        return /\(\d+\)/.test(t) && eRotuloDe('vender', t, /^Vender\s*\(/, true);
+      });
       if (!b) return null;
       const m = b.textContent.match(/\((\d+)\)/);
       return m ? parseInt(m[1], 10) : null;
@@ -518,8 +558,8 @@ PPX.modulo(
 
       // 1. desliga as grades protegidas, e confere que desligaram mesmo
       for (const nome of aba === 'Pokémon' ? PROTEGIDAS : []) {
-        const b = [...janela().querySelectorAll('.mks-fgrade')].find(
-          (x) => x.textContent.trim() === nome,
+        const b = [...janela().querySelectorAll('.mks-fgrade')].find((x) =>
+          eRotuloDe(nome, x.textContent, new RegExp(`^${NOME_DA_GRADE[nome]}$`)),
         );
         if (b && String(b.className).includes('on')) {
           b.click();
@@ -529,7 +569,9 @@ PPX.modulo(
       await esperar(600);
       const teimosas = aba === 'Pokémon' ? [...janela().querySelectorAll('.mks-fgrade')]
         .filter(
-          (b) => PROTEGIDAS.includes(b.textContent.trim()) && String(b.className).includes('on'),
+          (b) =>
+            PROTEGIDAS.some((g) => eRotuloDe(g, b.textContent, new RegExp(`^${NOME_DA_GRADE[g]}$`))) &&
+            String(b.className).includes('on'),
         )
         .map((b) => b.textContent.trim()) : [];
       if (teimosas.length)
@@ -537,7 +579,7 @@ PPX.modulo(
 
       // 2. marca tudo o que sobrou
       const sel = [...janela().querySelectorAll('button')].find((b) =>
-        /Selecionar tudo/.test(b.textContent || ''),
+        eRotuloDe('selecionarTudo', b.textContent, /Selecionar tudo/, true),
       );
       if (sel) {
         sel.click();
@@ -841,9 +883,10 @@ PPX.modulo(
       const r = await prepararVenda(aviso, aba);
       if (!r.ok) return `Venda parada: ${r.motivo}. Nada foi vendido.`;
 
-      const bt = [...janela().querySelectorAll('button')].find((x) =>
-        /^Vender\s*\(/.test((x.textContent || '').trim()),
-      );
+      const bt = [...janela().querySelectorAll('button')].find((x) => {
+        const t = (x.textContent || '').trim();
+        return /\(\d+\)/.test(t) && eRotuloDe('vender', t, /^Vender\s*\(/, true);
+      });
       if (!bt) return 'Nao achei o botao de vender.';
       const rotulo = bt.textContent.trim();
       bt.click();
@@ -851,7 +894,8 @@ PPX.modulo(
 
       const conf = await confirmar(r.total);
       if (conf.cancelou) return conf.motivo;
-      return `${aba}: Vendidos ${rotulo.replace(/^Vender\s*/, '')}`;
+      // Tira o verbo (Vender/Sell/…) e deixa so' o "(73) · 1.314.000".
+      return `${aba}: Vendidos ${rotulo.replace(/^[^(]*/, '')}`;
     }
 
     const venderAgora = (aviso = () => {}) => venderAba('Pokémon', aviso);
@@ -883,12 +927,15 @@ PPX.modulo(
       if (!caixa) return { cancelou: false, motivo: 'sem popup' };
 
       const texto = caixa.innerText || '';
-      const achado = texto.match(/(\d+)\s*linha/);
+      const achado = texto.match(/(\d+)\s*(?:linha|line|l[íi]nea)/i);
       const diz = achado ? parseInt(achado[1], 10) : null;
 
-      const botao = (re) => [...caixa.querySelectorAll('button')].find((b) => re.test(b.textContent));
-      const cancelar = botao(/Cancelar/i);
-      const seguir = botao(/Vender mesmo assim|Confirmar/i);
+      const porNome = (nomes, re) =>
+        [...caixa.querySelectorAll('button')].find((b) =>
+          nomes.some((n) => eRotuloDe(n, b.textContent, re, true)),
+        );
+      const cancelar = porNome(['cancelar'], /Cancelar/i);
+      const seguir = porNome(['venderMesmoAssim', 'confirmar'], /Vender mesmo assim|Confirmar/i);
 
       const desistir = async (motivo) => {
         if (cancelar) {

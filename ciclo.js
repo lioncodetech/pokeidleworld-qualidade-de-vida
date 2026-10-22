@@ -33,7 +33,34 @@ PPX.modulo(
     const esperar = (ms) =>
       globalThis.PPX?.pausa ? globalThis.PPX.pausa(ms) : new Promise((r) => setTimeout(r, ms));
     const botoes = () => [...document.querySelectorAll('button')];
-    const porTitulo = (t) => botoes().find((b) => (b.title || '').trim() === t);
+    /**
+     * Procura um botao do jogo pelo rotulo, nas tres linguas que o jogo tem.
+     *
+     * O `antigo` so' vale com um nucleo velho, que nao conhece rotulos: atualizar o pacote sem
+     * atualizar o nucleo nao pode partir a ferramenta inteira.
+     */
+    /**
+     * O titulo do marcador do mapa e' "Viajar para X" / "Travel to X": confere o verbo pelo
+     * rotulo e o destino pelo nome, que o jogo nao traduz.
+     */
+    const viajaPara = (titulo, destino) => {
+      const t = String(titulo || '').trim();
+      if (!t.endsWith(destino)) return false;
+      const verbo = t.slice(0, t.length - destino.length).trim();
+      const ppx = globalThis.PPX;
+      return ppx?.eRotulo ? ppx.eRotulo('viajarPara', verbo) : verbo === 'Viajar para';
+    };
+
+    const porRotulo = (nome, antigo, { texto = false, comeca = false, raiz = null } = {}) => {
+      const ppx = globalThis.PPX;
+      if (ppx?.botaoPorRotulo) return ppx.botaoPorRotulo(nome, { texto, comeca, raiz });
+      const onde = raiz || document;
+      return (
+        [...onde.querySelectorAll('button')].find((b) =>
+          antigo.test((texto ? b.textContent : b.title) || ''),
+        ) || null
+      );
+    };
     const porTexto = (re) => botoes().find((b) => re.test((b.textContent || '').trim()));
 
     // --- onde estamos -----------------------------------------------------------------------
@@ -122,7 +149,11 @@ PPX.modulo(
      */
     async function acharMark() {
       const alvos = [...document.querySelectorAll('.npc-plate-btn')]
-        .filter((b) => /Conversar/.test(b.textContent || ''))
+        .filter((b) =>
+          globalThis.PPX?.eRotulo
+            ? globalThis.PPX.eRotulo('conversar', b.textContent)
+            : /Conversar/.test(b.textContent || ''),
+        )
         .map((b) => {
           const r = b.getBoundingClientRect();
           const dx = r.x + r.width / 2 - innerWidth / 2;
@@ -158,7 +189,7 @@ PPX.modulo(
      * numero. Quem nao sabe quanto tem nao compra "a diferenca".
      */
     async function estoque(nome) {
-      const inv = porTitulo('Inventário');
+      const inv = porRotulo('inventario', /^Inventário$/);
       if (!inv) return null;
       if (!document.querySelector('.inv-window')) {
         inv.click();
@@ -223,12 +254,12 @@ PPX.modulo(
       if (!hunt) return false;
       await fecharInventario();
       await fecharJanela();
-      const mapa = porTitulo('Mapa');
+      const mapa = porRotulo('mapa', /^Mapa$/);
       if (!mapa) return false;
       mapa.click();
       await esperar(1800);
       const alvo = [...document.querySelectorAll('.hunt-marker')].find(
-        (m) => (m.title || '') === `Viajar para ${hunt}` || m.textContent.trim() === hunt,
+        (m) => viajaPara(m.title, hunt) || m.textContent.trim() === hunt,
       );
       if (!alvo) {
         nota(`Nao achei "${hunt}" no mapa — voce fica onde esta'.`);
@@ -260,7 +291,7 @@ PPX.modulo(
         if (interrompido()) return;
 
         // 1. cidade
-        const cerulean = porTitulo('Voltar para Cerulean');
+        const cerulean = porRotulo('cidade', /^Voltar para Cerulean$/);
         if (!cerulean) {
           nota('Nao achei o botao de voltar para Cerulean. Parei.');
           return;

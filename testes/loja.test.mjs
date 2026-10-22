@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { casadoresDeRotulo } from './nucleo-de-mentira.mjs';
 
 const fonte = readFileSync(new URL('../loja.js', import.meta.url), 'utf8');
 
@@ -39,6 +40,28 @@ function no(cls, texto = '', extras = {}) {
   };
 }
 
+// O jogo tem seletor de idioma, e a mesma loja tem de dar o mesmo resultado em qualquer um.
+const EM = {
+  pt: {
+    abas: ['🛒 Comprar', '💰 Vender', '🐾 Pokémon', '🎒 Itens'],
+    grades: ['Fraca', 'Comum', 'Rara', 'Lendária', 'Mítica', 'Anciã', 'Divina'],
+    vender: 'Vender',
+    selecionarTudo: 'Selecionar tudo',
+    cancelar: 'Cancelar',
+    venderMesmoAssim: 'Vender mesmo assim',
+    linhas: 'linha(s)',
+  },
+  en: {
+    abas: ['🛒 Buy', '💰 Sell', '🐾 Pokémon', '🎒 Items'],
+    grades: ['Weak', 'Common', 'Rare', 'Legendary', 'Mythic', 'Ancient', 'Divine'],
+    vender: 'Sell',
+    selecionarTudo: 'Select all',
+    cancelar: 'Cancel',
+    venderMesmoAssim: 'Sell anyway',
+    linhas: 'line(s)',
+  },
+};
+
 const casa = (n, sel) => {
   if (sel === 'button') return n.ehBotao === true;
   return String(n.className)
@@ -68,7 +91,10 @@ function montarLoja({
   barraTeimosa = false,
   tetoDaBarra = 10000,
   tooltipDinamico = {},
+  // Em que lingua o jogo esta': 'pt' ou 'en'. Os textos sairam do dicionario do proprio jogo.
+  lingua = 'pt',
 } = {}) {
+  const L = EM[lingua];
   const compras = [];
   const janela = no('mks-window');
   let saldo = dinheiro;
@@ -79,12 +105,12 @@ function montarLoja({
   };
   janela.filhos.push(ouro);
 
-  for (const rot of ['🛒 Comprar', '💰 Vender', '🐾 Pokémon', '🎒 Itens']) {
-    const t = no(rot === '🛒 Comprar' ? 'nsh-tab on' : 'nsh-tab', rot);
+  for (const rot of L.abas) {
+    const t = no(rot === L.abas[0] ? 'nsh-tab on' : 'nsh-tab', rot);
     janela.filhos.push(t);
   }
 
-  for (const g of ['Fraca', 'Comum', 'Rara', 'Lendária', 'Mítica', 'Anciã', 'Divina']) {
+  for (const g of L.grades) {
     const b = no('mks-fgrade on', g);
     b.ehBotao = true;
     b.aoClicar = () => {
@@ -154,7 +180,7 @@ function montarLoja({
     todasAsLinhas.push(linha);
   }
 
-  const btSelecionar = no('', '☐ Selecionar tudo');
+  const btSelecionar = no('', `☐ ${L.selecionarTudo}`);
   btSelecionar.ehBotao = true;
   btSelecionar.aoClicar = () => {
     for (const l of todasAsLinhas) l.marcar(true);
@@ -165,7 +191,7 @@ function montarLoja({
   const confirmados = [];
   const cancelados = [];
 
-  const btVender = no('', 'Vender');
+  const btVender = no('', L.vender);
   btVender.ehBotao = true;
   btVender.aoClicar = () => {
     if (popupDiz === null) return; // venda direta, sem confirmacao
@@ -177,15 +203,15 @@ function montarLoja({
     const aviso =
       popupDiz === 'mudo'
         ? '⚠️ CONFIRMAR VENDA DE POKÉMON\nConfira antes de prosseguir.'
-        : `⚠️ CONFIRMAR VENDA DE POKÉMON\nVocê selecionou TUDO: ${n} linha(s), por 💲${n * 18000}.`;
+        : `⚠️ CONFIRMAR VENDA DE POKÉMON\nVocê selecionou TUDO: ${n} ${L.linhas}, por 💲${n * 18000}.`;
     popup = no('mk-sellconfirm', aviso);
-    const bc = no('nsh-btn nsh-btn-alt', 'Cancelar');
+    const bc = no('nsh-btn nsh-btn-alt', L.cancelar);
     bc.ehBotao = true;
     bc.aoClicar = () => {
       cancelados.push(n);
       popup = null;
     };
-    const bs = no('nsh-btn', 'Vender mesmo assim');
+    const bs = no('nsh-btn', L.venderMesmoAssim);
     bs.ehBotao = true;
     bs.aoClicar = () => {
       confirmados.push(n);
@@ -199,7 +225,7 @@ function montarLoja({
         contagemDoJogo !== null
           ? contagemDoJogo
           : todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length;
-      return n ? `Vender (${n}) · 💲${n * 100}` : 'Vender';
+      return n ? `${L.vender} (${n}) · 💲${n * 100}` : L.vender;
     },
   });
   janela.filhos.push(btVender);
@@ -325,6 +351,9 @@ function montarLoja({
     controlar: () => {},
     vez: { pedir: async () => () => {} },
   };
+  // Os casadores de rotulo do nucleo DE VERDADE: sem eles este fake caia sempre para o texto
+  // portugues escrito a mao, e o caminho que o jogo em ingles usa ficava sem guarda.
+  Object.assign(PPX, casadoresDeRotulo({ querySelectorAll: (s) => doc.querySelectorAll(s) }));
   globalThis.PPX = PPX;
 
   const guardado = {};
@@ -370,6 +399,8 @@ function montarLoja({
     // Se ficou aberto: a mochila por cima do jogo estorva quem joga e quem automatiza.
     invAberto: () => invAberto,
     btVender,
+    /** Os botoes de filtro de grade, para conferir quais ficaram ligados. */
+    filtrosDeGrade: () => janela.filhos.filter((b) => String(b.className).includes('mks-fgrade')),
     marcados: () => todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length,
     confirmados,
     cancelados,
@@ -546,6 +577,11 @@ test('venda: nunca clica no botao Vender do jogo', async () => {
 // ---------------------------------------------------------------------------
 // O popup de confirmacao. Medido em 09/10/2026, depois de uma venda acidental:
 // com um pokemon so' a venda sai DIRETA, sem popup nenhum.
+
+const DOIS_COMUNS_EN = [
+  { nome: 'Venusaur', preco: 18000, grade: 'Common' },
+  { nome: 'Ivysaur', preco: 18000, grade: 'Common' },
+];
 
 const DOIS_COMUNS = [
   { nome: 'Venusaur', preco: 18000, grade: 'Comum' },
@@ -868,4 +904,95 @@ test('o que o minimizado esconde esta marcado, e o que ele guarda nao', () => {
 test('painel oferece um botao proprio para parar o ciclo', () => {
   assert.match(fonte, /⏹ Parar ciclo/);
   assert.match(fonte, /c\?\.parar\?\.\(\)/);
+});
+
+test('botao que diz so "Vender", sem o (n), nao e o botao da venda', async () => {
+  // O rotulo do botao da venda e' "Vender (73) · 💲…" / "Sell (73) · 💲…". Um "Vender" pelado e'
+  // outra coisa — aba, ou o botao antes de haver linha marcada — e clicar nele e' um clique que
+  // nao se desfaz. Por isso aqui exige-se o `(n)` alem do rotulo.
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [{ nome: 'Venusaur', preco: 18000, grade: 'Comum' }],
+    contagemDoJogo: 0,
+  });
+  const r = await p.api.venderAgora(() => {});
+  assert.equal(p.btVender.cliques, 0, 'nao clicou num botao que nao e o da venda');
+  assert.match(r, /botao de vender/);
+});
+
+// --- o jogo em ingles ---------------------------------------------------------------------------
+//
+// O pior caso de todos vivia aqui: as grades protegidas eram casadas pelo texto português
+// ("Lendária"). Com o jogo em inglês o filtro "Legendary" não era desligado E a auditoria não
+// reconhecia o lendário na linha — ou seja, a ferramenta vendia um lendário.
+
+test('em ingles: nao segue com um "Legendary" marcado', async () => {
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [
+      { nome: 'Venusaur', preco: 18000, grade: 'Common' },
+      { nome: 'Mewtwo', preco: 99000, grade: 'Legendary' },
+    ],
+    lingua: 'en',
+  });
+  // o desmarcar automatico resolve; forco o caso mau travando o checkbox do lendario
+  p.linhas[1].querySelector('.mks-check').aoClicar = () => {};
+  p.linhas[1].querySelector('.mks-check').checked = true;
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, false, 'tinha de parar: ha um lendario na lista');
+  assert.match(r.motivo, /Mewtwo/);
+  assert.match(r.motivo, /Lendária/, 'a ferramenta fala portugues, mesmo lendo o jogo em ingles');
+  assert.equal(p.btVender.cliques, 0);
+});
+
+test('em ingles: desliga os filtros das grades protegidas', async () => {
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [{ nome: 'Venusaur', preco: 18000, grade: 'Common' }],
+    lingua: 'en',
+  });
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, true, r.motivo);
+  const ligadas = p
+    .filtrosDeGrade()
+    .filter((b) => String(b.className).includes('on'))
+    .map((b) => b.textContent);
+  for (const g of ['Legendary', 'Mythic', 'Ancient', 'Divine'])
+    assert.ok(!ligadas.includes(g), `o filtro ${g} continuou ligado`);
+});
+
+test('em ingles: o filtro que nao desliga para a venda', async () => {
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [{ nome: 'Venusaur', preco: 18000, grade: 'Common' }],
+    filtroTrava: true,
+    lingua: 'en',
+  });
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /filtro nao desligou/);
+});
+
+test('em ingles: vende e confirma no popup "Sell anyway"', async () => {
+  const p = montarLoja({ dinheiro: 1000, linhas: DOIS_COMUNS_EN, lingua: 'en' });
+  const r = await p.api.venderAgora(() => {});
+  assert.deepEqual(p.confirmados, [2], 'confirmou a venda pelo botao em ingles');
+  assert.match(r, /Vendidos/);
+});
+
+test('a grade na linha vem no masculino, e tambem protege', async () => {
+  // O jogo escreve a grade de dois jeitos: "Lendária" no filtro da loja e "Lendário" na linha do
+  // pokemon. Conhecer so' a do filtro e' nao reconhecer o lendario que esta' marcado.
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [
+      { nome: 'Venusaur', preco: 18000, grade: 'Comum' },
+      { nome: 'Mewtwo', preco: 99000, grade: 'Lendário' },
+    ],
+  });
+  p.linhas[1].querySelector('.mks-check').aoClicar = () => {};
+  p.linhas[1].querySelector('.mks-check').checked = true;
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, false, 'tinha de parar: ha um lendario marcado');
+  assert.match(r.motivo, /Mewtwo/);
 });

@@ -749,6 +749,30 @@ não há ninguém vendo o compasso mesmo.
 O pacote do PokePixel é outro, com outro repositório, e declara apenas o site dele. Dois pacotes
 que declarassem o mesmo site se injetariam na mesma página e disputariam os atalhos.
 
+## Em que idioma do jogo funciona
+
+Nos três: **inglês, português e espanhol**.
+
+O jogo traduz o texto dos botões, e até à 1.5.1 as ferramentas procuravam o texto português
+(`Voltar para Cerulean`, `Conversar`, `Abrir Depósito`). Com o jogo em inglês elas não achavam
+botão nenhum e paravam sem dizer nada — guardar um time, por exemplo, não acontecia, porque a ida
+até ao Depósito começa por voltar a Cerulean.
+
+Agora cada rótulo está num lugar só, com as três formas, tiradas do próprio dicionário de idiomas
+que o jogo publica. Se você trocar o idioma do jogo no meio, basta recarregar a página.
+
+Nome próprio não é traduzido pelo jogo e também não aqui: `Cerulean`, os nomes das caçadas e os
+nomes dos itens continuam iguais em qualquer idioma.
+
+O caso mais sério era a venda: as grades protegidas (Lendária, Mítica, Anciã, Divina) eram
+reconhecidas pelo nome em português. Com o jogo em inglês o filtro `Legendary` não era desligado e
+a auditoria não via o lendário na linha — a ferramenta podia **vender um lendário**. Hoje as
+quatro grades são reconhecidas nos três idiomas, nas duas formas em que o jogo as escreve, e há
+testes com a loja em inglês exatamente nesse caso.
+
+As mensagens da ferramenta continuam em português, mesmo com o jogo em inglês: ela fala com você,
+não com o jogo.
+
 ## Aviso
 
 Automatiza ações do jogo. O Poke Idle World oferece captura automática como recurso VIP; se os

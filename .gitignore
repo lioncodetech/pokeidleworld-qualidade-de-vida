@@ -1,0 +1,14 @@
+# Sobras de release.
+#
+# O pacote publicado NAO sai daqui: ele e' montado pela automacao do `.github/workflows/release.yml`,
+# num checkout limpo, a partir de uma tag. O que fica aqui e' copia de trabalho — e uma copia de
+# trabalho de um .zip e' a pior coisa que se pode versionar: pesa, nao se le' num diff e nunca e' a
+# que esta' publicada.
+#
+# Eram dezassete destes a sujar o `git status` quando isto foi escrito, em 27/10/2026. No repo
+# irmao do PokePixel um `git add -A` chegou a varrer tres pastas de release, com os binarios dentro,
+# para dentro de um commit; deu para desfazer porque alguem olhou para a lista de ficheiros, e e'
+# justamente esse "alguem olhou" que nao se pode exigir sempre.
+pokeidleworld-qualidade-de-vida-*.zip
+pokeidleworld-qualidade-de-vida-*.zip.sha256
+release-*/

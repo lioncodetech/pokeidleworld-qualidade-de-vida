@@ -90,6 +90,34 @@ A regra agora:
   traduz é o verbo em volta: o marcador do mapa é `Viajar para X` / `Travel to X`, e por isso se
   confere o verbo pelo rótulo e o destino pelo nome.
 
+## A memória da página, e por que há um F5 programado
+
+Medido no servidor ARM em 22/10/2026, quatro janelas do jogo abertas há três horas: a fatia do
+LionMultInstance em 3,4 GB, e o renderizador mais velho sozinho em 1,1 GB — 946 MB deles memória
+**anónima** (heap do processo), contra 16 MB de ficheiro mapeado. Não é o Chromium a duplicar-se,
+é a página a ocupar aquilo. Sem placa de vídeo o WebGL corre em SwiftShader, e cada textura e
+cada ladrilho que numa GPU viveria na placa vive na RAM do renderizador.
+
+O patamar **oscila** algumas centenas de MB — o Chromium recolhe sozinho — mas a página mais velha
+sobe devagar e não volta: +45 MB em meia hora, sem ninguém a jogar nela. Daí `recarregar.js`.
+
+O que já se sabe e não se deve re-descobrir:
+
+- **o F5 não custa estado.** O jogo guarda tudo no servidor, e a fila (`vez`) vive em
+  `sessionStorage`, que atravessa a recarga. O `pagehide` do núcleo solta a vez sozinho, por isso
+  quem recarrega não tem de a devolver do outro lado;
+- **nunca contar o prazo num relógio guardado.** Contado do carregamento, não existe estado em que
+  a página carregue e queira recarregar logo — e é isso que torna um ciclo de recargas impossível;
+- **temporizador longo não serve.** Em aba oculta o navegador estrangula para uma vez por minuto,
+  e um `setTimeout` de trinta minutos acorda tarde. Batida curta a comparar `Date.now()` com o
+  prazo: o estrangulamento atrasa, nunca salta;
+- **`sem-grafico` devia ajudar aqui, e ainda não foi medido.** Ela para o ticker do Pixi e corre o
+  `textureGC` do próprio motor, que numa máquina sem GPU devolve RAM. Em 22/10/2026 tentou-se medir
+  o efeito de fora, por `xdotool`, e **não se mediu nada**: os eventos de teclado sintéticos não
+  chegaram à view (o `localStorage` dos perfis não foi reescrito, prova de que o Alt+G não chegou).
+  Quem for medir isto outra vez: confirme primeiro que a tecla chegou, olhando a chave
+  `lioncode:pokeidleworld:sem-grafico` do perfil, e só depois leia a RSS.
+
 ## Segundo plano é o caso normal, não a exceção
 
 O utilizador joga em várias janelas ao mesmo tempo, quase todas escondidas. **`setInterval` é

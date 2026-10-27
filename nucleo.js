@@ -522,6 +522,16 @@
       // Ela guarda o proprio estado, na chave dela, e corre do outro lado da fronteira.
       proprio: true,
     },
+    {
+      id: 'recarregar',
+      nome: 'Recarregar sozinho',
+      atalhos: 'no menu (Alt+Q)',
+      // Painel proprio, como as Caçadas: o botao do meio mostra e esconde, e o ligar/desligar do
+      // relogio vive dentro do painel, ao lado do intervalo que ele usa. Sem atalho de teclado de
+      // proposito: as letras livres estao a acabar, e uma tecla que recarrega a pagina por engano
+      // e' a pior de todas para se descobrir sem querer.
+      proprio: true,
+    },
     // O ciclo nao tem janela nem estado ligado/desligado: e' uma acao que se dispara e acaba.
     {
       id: 'ciclo',

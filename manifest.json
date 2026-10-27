@@ -40,7 +40,8 @@
         "cacadas.js",
         "times.js",
         "escada.js",
-        "arrumar.js"
+        "arrumar.js",
+        "recarregar.js"
       ],
       "run_at": "document_idle"
     }

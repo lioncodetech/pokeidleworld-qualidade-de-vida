@@ -1581,3 +1581,34 @@ test('a aba dos itens da familia nao se confunde com a dos pokemon', async () =>
   assert.equal(r.ok, true, r.erro);
   assert.deepEqual(p.dep.est.familiaItens, protegidos, 'foi para a aba dos itens, nao a dos pokemon');
 });
+test('o segundo clique do Deposito e no dialogo, e nao na placa da rua', () => {
+  // **DOIS BOTOES RESPONDEM PELO MESMO ROTULO, E SAO COISAS DIFERENTES.** Medido na conta do
+  // dono em 27/10/2026, com o dialogo aberto:
+  //
+  //     .npc-plate-btn  "Abrir Depot"         <- a placa, la fora
+  //     .npc-dlg-btn    "📦 Abrir Depósito"   <- o que abre mesmo a janela
+  //
+  // `botaoPorRotulo` devolve o primeiro do documento, e a placa vem antes. O "segundo clique"
+  // voltava a clicar na placa, que so reabre o dialogo: a janela nunca aparecia, o ciclo parava
+  // em "Cliquei no Depot e a janela nao abriu" e a venda inteira ficava por fazer.
+  // Sem os comentarios: a explicacao do conserto cita o seletor errado de proposito, e um
+  // guarda que casasse com ela reprovaria o texto em vez do codigo.
+  const fonteTimes = readFileSync(new URL('../times.js', import.meta.url), 'utf8')
+    .split('\n')
+    .filter((linha) => !/^\s*(\/\/|\*|\/\*)/.test(linha))
+    .join('\n');
+  const bloco = fonteTimes.slice(fonteTimes.indexOf('const confirmar ='), fonteTimes.indexOf('const confirmar =') + 400);
+  // E a caixa e' `.npc-dlg-actions`: o dialogo nao tem contentor com `npc-dlg` na classe, so
+  // pecas irmas, e `[class*=npc-dlg]` cai no cabecalho, que so tem o "×". Essa foi a segunda
+  // versao errada deste mesmo conserto, no mesmo dia.
+  assert.match(bloco, /\.npc-dlg-actions/);
+  assert.match(bloco, /raiz: caixa/);
+  assert.ok(
+    !/\[class\*=npc-dlg\]/.test(bloco),
+    'o seletor largo cai no cabecalho do dialogo, onde o botao nao esta',
+  );
+  assert.ok(
+    !/const confirmar = \(\) => porRotulo\('deposito', \/Abrir Dep\[oó\]sito\/i, \{ texto: true \}\);/.test(fonteTimes),
+    'a procura nao pode voltar a varrer o documento inteiro: a placa da rua ganha sempre',
+  );
+});

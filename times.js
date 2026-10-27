@@ -799,7 +799,30 @@ PPX.modulo(
       // ("Depot — Guarda seus itens no depósito") com um botao `.npc-dlg-btn` escrito "Abrir
       // Depósito". Era isto que faltava: a ferramenta clicava na placa, nao via `.dpt-window` e
       // dizia que a janela nao tinha aberto — quando na verdade faltava o segundo clique.
-      const confirmar = () => porRotulo('deposito', /Abrir Dep[oó]sito/i, { texto: true });
+      /**
+       * **O BOTAO DO DIALOGO, E NAO A PLACA DA RUA.** Dois botoes respondem pelo rotulo
+       * `deposito`, e sao coisas diferentes:
+       *
+       *     .npc-plate-btn  "Abrir Depot"         <- a placa, la' fora
+       *     .npc-dlg-btn    "📦 Abrir Depósito"   <- o que abre mesmo a janela
+       *
+       * `botaoPorRotulo` devolve o **primeiro do documento**, e a placa vem antes. Entao o
+       * "segundo clique" voltava a clicar na placa, que so' reabre o dialogo: a janela nunca
+       * aparecia e o ciclo parava em "Cliquei no Depot e a janela nao abriu" — medido na conta do
+       * dono em 27/10/2026, com a venda inteira a ficar por fazer por causa disto.
+       *
+       * A procura limita-se ao dialogo. E' para isto que o `raiz` existe: evitar clicar no botao
+       * certo da caixa errada.
+       */
+      const confirmar = () => {
+        // **`.npc-dlg-actions`, e nao `[class*=npc-dlg]`.** O dialogo nao tem um contentor com
+        // `npc-dlg` na classe: as pecas sao `npc-dlg-head`, `-ico`, `-name`, `-desc`, `-actions`
+        // e `-btn`, irmas umas das outras. Procurar por `[class*=npc-dlg]` cai no **cabecalho**,
+        // que so' tem o "×" — e a procura devolvia nada. Medido em 27/10/2026, a seguir a este
+        // mesmo conserto ter sido escrito errado.
+        const caixa = document.querySelector('.npc-dlg-actions');
+        return caixa ? porRotulo('deposito', /Abrir Dep[oó]sito/i, { texto: true, raiz: caixa }) : null;
+      };
       if (await ateQue(() => !!confirmar() || !!janela(), 6000)) {
         const bt = confirmar();
         if (bt && !janela()) {

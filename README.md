@@ -12,6 +12,7 @@ Extensão de navegador para o [Poke Idle World](https://poke.idleworld.online).
 | Escada de caçadas | troca de caçada sozinha quando o líder sobe de nível, e roda a equipe inteira até o teto | Alt+B esconde · Alt+N mostra |
 | Arrumar os painéis | põe cada janela no canto dela, guarda arrumações suas e manda-as às outras janelas | Alt+U esconde · Alt+J mostra · Alt+Shift+J arruma |
 | Sem gráfico | para o desenho do jogo e deixa a lógica andando | Alt+G para · Alt+H volta |
+| Recarregar sozinho | dá F5 na janela de tantos em tantos minutos | no menu (Alt+Q) |
 
 **Alt+Q** abre o menu, que liga e desliga a ferramenta sem precisar do atalho.
 
@@ -157,10 +158,21 @@ fecha, e escreve o número **ao lado de cada linha** (`Ultra Ball · tem 8`). Se
 aparecia depois de uma compra — e quem quer *decidir* o alvo precisa de ver quanto tem antes de
 gastar. Quando o jogo escreve `9999+`, a ferramenta lê a quantidade exata que aparece no tooltip
 ao passar o mouse. Como esse número não existe no HTML parado, a extensão aciona o hover de cada
-slot truncado e captura o tooltip dinâmico; só mantém `9999+` quando ele não traz um número
-confiável. As duas
+slot truncado e lê o tooltip **daquele** slot — `.inv-tip-name` traz o nome e `.inv-tip-qty` o
+número —, conferindo que o nome bate antes de aceitar a quantidade. Sem tooltip, ou com um
+tooltip de outro item, mantém `9999+` e trata como desconhecido. As duas
 leituras da compra pintam o mesmo lugar, então abrir o painel depois de um ciclo já mostra os
 números dele.
+
+> **Por que o nome tem de bater.** Até 27/10/2026 esta leitura funcionava ao contrário: ela ouvia
+> **a página inteira** enquanto o mouse estava parado, juntava todos os números ≥ 10.000 que
+> aparecessem em qualquer lugar e ficava com o maior. Numa página viva isso é o chat, a EXP, o
+> saldo e os contadores. Na conta do dono a Ultra Ball apareceu com `1784953486005109` e a Great
+> Potion com `2045511` — que era o `2045847 itens` do cabeçalho do inventário, subindo sozinho com
+> a caçada. E o estrago era **mudo**: número enorme contra o alvo dá "alvo cheio", então não se
+> comprava nada e não havia erro nenhum. Há um tooltip só para o inventário inteiro, e ele some ao
+> sair de cima do slot; um tooltip ainda aberto é do item anterior. É por isso que o número só
+> conta quando vem acompanhado do nome certo.
 
 **Variar o alvo em ± (%)**, igual ao pacote do PokePixel: com 3%, um alvo de 20.000 vira algo
 entre 19.400 e 20.600, sorteado a cada compra. Sem isso a mochila termina sempre no mesmo número
@@ -718,6 +730,33 @@ O que foi medido no Depósito, e que decidiu o código:
   guardado, nem a mais nem a menos.
 
 As duas pedem a vez em `PPX.vez` antes de agir, como todas as outras.
+
+## Recarregar sozinho
+
+Um painel pequeno com uma caixa, um campo de minutos e um botão **Recarregar agora**. Ligado, ele
+dá F5 na janela de tantos em tantos minutos (de 5 a 720; o padrão é 30).
+
+Para que serve: a página do jogo vai juntando memória, e numa máquina sem placa de vídeo isso
+pesa muito mais, porque o desenho é feito por software e cada textura fica na RAM do processo.
+Medido num servidor em 22/10/2026, com quatro janelas abertas há três horas: 3,4 GB no total, e a
+página mais velha sozinha com 1,1 GB — dos quais 946 MB de memória do próprio processo. O F5
+devolve tudo isso, porque o estado do jogo é do servidor e não da página; o que faltava era não
+ter de fazer isso à mão, janela a janela.
+
+Três cuidados, que são o motivo de isto não ser um `setInterval` com um `location.reload()`
+dentro:
+
+- **pede a vez antes de recarregar.** Recarregar no meio de uma venda é perder a venda a meio.
+  Entra na mesma fila de todas as outras ferramentas, e se não conseguir a vez fica para a próxima
+  batida;
+- **não recarrega a janela que você está a usar.** Se ela está à vista e houve rato ou tecla no
+  último minuto, adia um minuto. A janela escondida — o caso normal quando há várias abertas —
+  recarrega na hora;
+- **o prazo conta do carregamento da página, e não é guardado.** Uma janela que abre com o prazo
+  já vencido não se recarrega: ela acabou de carregar, está limpa. É isso que também torna
+  impossível um ciclo de recargas.
+
+Mudar o número de minutos reconta do zero.
 
 ## O compasso (`pausa.js`)
 

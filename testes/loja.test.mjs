@@ -91,6 +91,9 @@ function montarLoja({
   barraTeimosa = false,
   tetoDaBarra = 10000,
   tooltipDinamico = {},
+  // O tooltip nao some ao sair de cima: serve para provar que a leitura recusa o tooltip do
+  // item anterior em vez de aceitar o numero dele.
+  dicaAtualFica = false,
   // Em que lingua o jogo esta': 'pt' ou 'en'. Os textos sairam do dicionario do proprio jogo.
   lingua = 'pt',
 } = {}) {
@@ -263,6 +266,23 @@ function montarLoja({
   }
   class EventoMouse { constructor(type) { this.type = type; } }
 
+  /**
+   * O tooltip do inventario, com a forma que ele tem no jogo — medida em 27/10/2026:
+   *
+   *     <div class="inv-tip">
+   *       <div class="inv-tip-name">Dome Fossil ×31</div>
+   *       <div class="inv-tip-qty">×31</div>
+   *
+   * Ha' **um so'** para o inventario inteiro, e ele some ao sair de cima do slot. E' por isso que
+   * a leitura tem de conferir o nome: um tooltip ainda aberto e' do item anterior.
+   */
+  let dicaAtual = null;
+  const montarDica = (nome, quantos) => {
+    const d = no('inv-tip', `${nome} ×${quantos}`);
+    d.filhos.push(no('inv-tip-name', `${nome} ×${quantos}`), no('inv-tip-qty', `×${quantos}`));
+    return d;
+  };
+
   let slotsCache = null;
   const slots = () => {
     if (!sacola) return [];
@@ -277,8 +297,10 @@ function montarLoja({
         s.getBoundingClientRect = () => ({ x: 0, y: 0, width: 40, height: 40 });
         s.dispatchEvent = (ev) => {
           const exato = tooltipDinamico[nome];
-          if (exato && ev.type === 'mouseover' && observadorTooltip)
-            observadorTooltip.fn([{ target: { textContent: `Quantidade: ${exato}` }, addedNodes: [] }]);
+          if (ev.type === 'mouseover' && exato) dicaAtual = montarDica(nome, exato);
+          // Sair de cima apaga o tooltip, como no jogo: sem isto, o do item anterior ficava a
+          // responder pelo seguinte, que e' precisamente o engano que a leitura tem de recusar.
+          if (ev.type === 'mouseout' && !dicaAtualFica) dicaAtual = null;
         };
         s.querySelector = (sel) =>
           sel === 'img' ? { alt: nome } : sel === '.inv-qty' ? qty : null;
@@ -290,6 +312,7 @@ function montarLoja({
   const doc = {
     querySelector: (sel) => {
       if (sel === '.mk-sellconfirm') return popup;
+      if (sel === '.inv-tip') return dicaAtual;
       if (sel === '.inv-window') return invAberto ? janelaInv : null;
       return casa(janela, sel) ? janela : janela.querySelector(sel);
     },
@@ -721,6 +744,59 @@ test('9999+ captura o tooltip que o jogo cria somente durante o hover', async ()
 
   assert.equal(p.compras.filter((n) => n === 'Ultra Ball').length, 5);
   assert.match(r.relato.join(' '), /12345 → 12350 \(\+5\)/);
+});
+
+test('o numero tem de vir do tooltip DAQUELE item, e nao de um que ficou aberto', async () => {
+  // **O DEFEITO QUE ISTO GUARDA FOI APANHADO NA CONTA DO DONO EM 27/10/2026.** A leitura antiga
+  // punha um MutationObserver em `document.body`, juntava todos os numeros >= 10000 que
+  // aparecessem em qualquer sitio da pagina e ficava com o maior. A Ultra Ball apareceu com
+  // 1784953486005109 e a Great Potion com 2045511 — que era o contador "2045847 itens" do
+  // cabecalho do inventario, a subir sozinho com a cacada.
+  //
+  // E o estrago era mudo: numero enorme contra o alvo da' "alvo cheio", entao nao se comprava
+  // nada e nao havia erro nenhum. Por isso aqui so' se aceita o tooltip que **diz o nome** do
+  // item que esta' a ser lido.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: LOJA_BOLAS,
+    mochila: { 'Ultra Ball': { texto: '9999+' }, 'Great Ball': { texto: '9999+' } },
+    // So' a Ultra Ball tem tooltip, e ele fica colado depois de sair de cima dela.
+    tooltipDinamico: { 'Ultra Ball': 12345 },
+    dicaAtualFica: true,
+  });
+  p.api.cfg.tetos = { 'Great Ball': 50 };
+  p.api.cfg.variacao = 0;
+
+  const r = await p.api.abastecer();
+  const texto = r.relato.join(' ');
+
+  // A Great Ball nao pode herdar o 12345 da Ultra Ball.
+  assert.ok(!/12345/.test(texto), `o numero da Ultra Ball vazou para outro item: ${texto}`);
+  assert.deepEqual(p.compras, [], 'sem saber quanto tem, nao se compra "a diferenca"');
+  assert.match(texto, /Great Ball: já passa de 9999/);
+});
+
+test('sem tooltip nenhum, o 9999+ continua desconhecido em vez de virar um numero', () => {
+  // Nao saber e' um estado honesto. O erro de antes nao era nao saber: era **inventar** a partir
+  // do primeiro numero grande que passasse na tela.
+  // Lido sem os comentarios: o proprio comentario do conserto fala no observador que saiu daqui,
+  // e um guarda que casasse com ele reprovaria a explicacao em vez do codigo.
+  const codigo = fonte
+    .split('\n')
+    .filter((linha) => !/^\s*(\/\/|\*|\/\*)/.test(linha))
+    .join('\n');
+  assert.ok(
+    !/new MutationObserver/.test(codigo),
+    'a leitura nao pode voltar a ouvir a pagina inteira a procura de numeros',
+  );
+  assert.ok(
+    !/observe\(document\.body/.test(codigo),
+    'ouvir o body inteiro foi exactamente o que leu o contador do inventario como se fosse o item',
+  );
+  assert.match(fonte, /\.inv-tip-name/);
+  assert.match(fonte, /\.inv-tip-qty/);
+  // E o nome confere-se ANTES de o numero ser aceite.
+  assert.match(fonte, /soONome\(nomeNaDica\) === soONome\(nome\)/);
 });
 
 test('sem conseguir abrir a mochila, nao compra nada', async () => {

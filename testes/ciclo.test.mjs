@@ -314,3 +314,23 @@ test('em ingles: le o estoque pelo botao "Inventory"', async () => {
   const p = montar({ estoqueDe: { 'Poké Ball': 42 }, lingua: 'en' });
   assert.equal(await p.api.estoque('Poké Ball'), 42);
 });
+test('a volta procura em todas as regioes do mapa, e nao so na aba aberta', () => {
+  // **MEDIDO NA CONTA DO DONO EM 27/10/2026.** Com o Kanto a' vista ha' 227 `.hunt-marker` e
+  // nenhum deles e' do Outland: os marcadores das outras regioes nao existem no DOM ate' a aba
+  // ser aberta. A cacada do dono e' no Outland, o ciclo voltou ao mapa no Kanto, nao achou, e
+  // deixou o personagem parado em Cerulean com a cacada desligada.
+  //
+  // "Nao achei X no mapa" nao era verdade — era "nao achei nesta aba", e a diferenca entre as
+  // duas frases e' uma hora de cacada perdida sem ninguem perceber.
+  assert.match(fonte, /\.map-areas \.map-plate/);
+  assert.match(fonte, /const procurar = \(\) =>/);
+
+  // As trancadas nao se tentam: clicar nelas nao leva a lado nenhum. E a que ja' esta aberta
+  // tambem nao, porque ja foi procurada antes do laco.
+  assert.match(fonte, /includes\('locked'\)/);
+  assert.match(fonte, /includes\('on'\)/);
+
+  // E a mensagem acompanhou: dizer "no mapa" quando se olhou uma aba so manda procurar o defeito
+  // no sitio errado.
+  assert.match(fonte, /em nenhuma regiao do mapa/);
+});

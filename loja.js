@@ -177,39 +177,77 @@ PPX.modulo(
       }
     }
 
-    /** Aciona o hover que cria o tooltip com a quantidade inteira dos slots `9999+`. */
+    /**
+     * A quantidade inteira dos slots `9999+`, lida do tooltip do proprio jogo.
+     *
+     * **A VERSAO ANTERIOR LIA A PAGINA INTEIRA, E ISSO NAO E' UM EXAGERO.** Ela punha um
+     * `MutationObserver` em `document.body`, recolhia todos os numeros >= 10000 que aparecessem
+     * em qualquer sitio enquanto o rato estava parado, e ficava com **o maior**. Numa pagina viva
+     * isso e' o chat, a EXP, o saldo e os contadores.
+     *
+     * Apanhado na conta do dono em 27/10/2026: a Ultra Ball aparecia com **1784953486005109** e a
+     * Great Potion com **2045511**, enquanto o cabecalho do inventario dizia "2045847 itens" — e
+     * esse cabecalho subia sozinho com a cacada. Ela estava a ler o contador do inventario.
+     *
+     * E o estrago era silencioso, que e' o pior: numero enorme contra o alvo da' "alvo cheio",
+     * entao **nao se comprava nada e nao havia erro nenhum**.
+     *
+     * O jogo ja' da' a resposta certa, e com o nome ao lado dela:
+     *
+     *     <div class="inv-tip">
+     *       <div class="inv-tip-name">Dome Fossil ×31</div>
+     *       <div class="inv-tip-qty">×31</div>
+     *
+     * Por isso agora **le-se o tooltip daquele slot e confere-se o nome antes de aceitar o
+     * numero**. Um numero sem nome ao lado nao prova a quem pertence, e era disso que vinha o erro.
+     * Sem tooltip, fica sem saber — e nao saber e' um estado honesto, que a leitura ja' trata.
+     */
+    const soONome = (t) =>
+      String(t || '')
+        .replace(/[×x]\s*[\d.,]+\s*$/u, '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
     async function revelarQuantidadesExatas() {
       const truncados = [...document.querySelectorAll('.inv-slot')].filter((slot) =>
         /\+/.test(slot.querySelector('.inv-qty')?.textContent || ''),
       );
       for (const slot of truncados) {
-        const textos = [];
-        const olho = typeof MutationObserver === 'undefined' ? null : new MutationObserver((lotes) => {
-          for (const lote of lotes) {
-            if (lote.target?.textContent) textos.push(lote.target.textContent);
-            for (const no of lote.addedNodes || []) if (no?.textContent) textos.push(no.textContent);
-          }
-        });
-        olho?.observe(document.body, { childList: true, subtree: true, characterData: true });
+        const nome = (slot.querySelector('img')?.alt || '').trim();
+        if (!nome) continue;
+        // Um slot escondido — noutra aba do inventario — nao recebe hover e nao tem tooltip.
+        // Tentar na mesma nao da' erro; so' nao da' numero, e sem numero fica o `9999+`.
         try {
           const r = slot.getBoundingClientRect();
           const opts = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
           for (const tipo of ['pointerover', 'mouseover', 'mouseenter', 'mousemove'])
             slot.dispatchEvent(new MouseEvent(tipo, opts));
           await esperar(350);
-          for (const el of document.querySelectorAll(
-            '[role="tooltip"],[class*="tooltip"],[class*="Tooltip"],[class*="item-tip"]',
-          )) if (el.textContent) textos.push(el.textContent);
+
+          const dica = document.querySelector('.inv-tip');
+          const nomeNaDica = dica?.querySelector('.inv-tip-name')?.textContent;
+          // **O nome tem de bater.** O tooltip e' um so' para o inventario inteiro: se ele ainda
+          // estiver a mostrar o item anterior, o numero la' dentro e' do item anterior.
+          if (nomeNaDica && soONome(nomeNaDica) === soONome(nome)) {
+            const texto = dica.querySelector('.inv-tip-qty')?.textContent || nomeNaDica;
+            const v = parseInt(String(texto).replace(/\D/g, ''), 10);
+            if (Number.isFinite(v) && v > 0) slot.dataset.ppxQuantidadeExata = String(v);
+          }
         } catch (e) {
           // Sem evento de mouse, conserva o seguro `9999+` desconhecido.
         } finally {
-          olho?.disconnect();
+          // Sai de cima do slot, para o tooltip do proximo nao ser o deste.
+          try {
+            for (const tipo of ['mouseout', 'pointerout', 'mouseleave'])
+              slot.dispatchEvent(new MouseEvent(tipo, { bubbles: true }));
+          } catch (e) {
+            // Sair de cima e' cortesia; nao saber sair nao estraga a leitura seguinte, que
+            // confere o nome de qualquer maneira.
+          }
         }
-        const numeros = textos
-          .flatMap((t) => String(t).match(/\d[\d.,]*/g) || [])
-          .map((t) => parseInt(t.replace(/\D/g, ''), 10))
-          .filter((n) => Number.isFinite(n) && n >= 10000);
-        if (numeros.length) slot.dataset.ppxQuantidadeExata = String(Math.max(...numeros));
       }
     }
 

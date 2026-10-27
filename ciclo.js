@@ -258,11 +258,37 @@ PPX.modulo(
       if (!mapa) return false;
       mapa.click();
       await esperar(1800);
-      const alvo = [...document.querySelectorAll('.hunt-marker')].find(
-        (m) => viajaPara(m.title, hunt) || m.textContent.trim() === hunt,
-      );
+      /**
+       * **O MAPA TEM REGIOES, E SO' A ABERTA ESTA' NO DOM.** Medido na conta do dono em
+       * 27/10/2026: com o Kanto a' vista ha' 227 `.hunt-marker`, e nenhum deles e' do Outland —
+       * os marcadores das outras regioes nao existem ate' a aba ser aberta.
+       *
+       * A procura antiga olhava so' para a aba aberta. A cacada do dono e' no Outland, o ciclo
+       * voltou ao mapa no Kanto, nao achou, e deixou o personagem parado em Cerulean com a
+       * cacada desligada. "Nao achei X no mapa" nao era verdade: era "nao achei nesta aba".
+       *
+       * As abas sao `.map-plate` dentro de `.map-areas`; `.on` e' a aberta e `.locked` sao as que
+       * o nivel ainda nao abriu — essas nem se tentam, clicar nelas nao leva a lado nenhum.
+       */
+      const procurar = () =>
+        [...document.querySelectorAll('.hunt-marker')].find(
+          (m) => viajaPara(m.title, hunt) || m.textContent.trim() === hunt,
+        );
+
+      let alvo = procurar();
       if (!alvo) {
-        nota(`Nao achei "${hunt}" no mapa — voce fica onde esta'.`);
+        const regioes = [...document.querySelectorAll('.map-areas .map-plate')].filter(
+          (p) => !String(p.className).includes('locked') && !String(p.className).includes('on'),
+        );
+        for (const regiao of regioes) {
+          regiao.click();
+          await esperar(1500);
+          alvo = procurar();
+          if (alvo) break;
+        }
+      }
+      if (!alvo) {
+        nota(`Nao achei "${hunt}" em nenhuma regiao do mapa — voce fica onde esta'.`);
         return false;
       }
       alvo.click();

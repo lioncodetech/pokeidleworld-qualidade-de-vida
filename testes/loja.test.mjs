@@ -116,6 +116,10 @@ function montarLoja({
   // porque a banca encurta todos os `setTimeout` para 1 ms: um atraso de relogio nunca
   // aconteceria num teste. `0` e' a mochila ja' desenhada, que e' o caso de todos os outros.
   slotsAtrasados = 0,
+  // `mochilaFechaAoLer` e' o jogo a fechar a mochila sozinho enquanto o personagem anda, medido
+  // em 28/10/2026: ela abriu com 30 slots e meio segundo depois estava fechada. Conta-se em
+  // consultas aos slots, porque a banca encurta todos os `setTimeout` para 1 ms.
+  mochilaFechaAoLer = 0,
 } = {}) {
   const L = EM[lingua];
   const compras = [];
@@ -238,6 +242,7 @@ function montarLoja({
   for (const l of todasAsLinhas) l.parentElement = caixa;
 
   let consultasAosSlots = 0;
+  let queda = false; // a mochila ja' perdeu os slots e esta' prestes a fechar
   const nascida = Date.now();
   const naTela = () => {
     // Antes de a lista desenhar, o DOM nao tem linha nenhuma — nao tem "lista vazia", tem nada.
@@ -417,7 +422,14 @@ function montarLoja({
     querySelector: (sel) => {
       if (sel === '.mk-sellconfirm') return popup;
       if (sel === '.inv-tip') return dicaAtual;
-      if (sel === '.inv-window') return invAberto ? janelaInv : null;
+      if (sel === '.inv-window') {
+        if (queda) {
+          // Ja' se leu a lista vazia; agora a janela sai tambem, como no jogo.
+          invAberto = false;
+          queda = false;
+        }
+        return invAberto ? janelaInv : null;
+      }
       return casa(janela, sel) ? janela : janela.querySelector(sel);
     },
     querySelectorAll: (sel) => {
@@ -425,6 +437,14 @@ function montarLoja({
         if (!invAberto) return [];
         if (consultasAosSlots < slotsAtrasados) {
           consultasAosSlots += 1;
+          return [];
+        }
+        consultasAosSlots += 1;
+        // A consulta que apanha a mochila a sair: os slots ja' nao estao la', a janela ainda
+        // esta' — e e' SO' a seguir que ela fecha. Foi este instante que deu "79492 → 0".
+        if (mochilaFechaAoLer && consultasAosSlots > mochilaFechaAoLer) {
+          slotsCache = null;
+          queda = true;
           return [];
         }
         return slots();
@@ -1050,6 +1070,23 @@ test('espera a mochila desenhar antes de dizer quanto tem', async () => {
   p.api.cfg.tetos = { 'Ultra Ball': 40000 };
 
   assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Todos os alvos estao cheios.');
+});
+
+test('mochila que fecha a meio da leitura nao vira zero de tudo', async () => {
+  // Medido na conta do dono em 28/10/2026, com o ciclo a correr: a mochila abriu com 30 slots e
+  // meio segundo depois estava fechada — o jogo fecha-a sozinho quando o personagem anda, como
+  // faz a' loja. A leitura dava zero de tudo, saia "Ultra Ball: 79492 → 0", e a compra seguinte
+  // pedia 38849 Ultra Balls que ja' estavam na bolsa. Um item que falta e' zero; uma mochila
+  // que fechou a meio nao e' zero de nada.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: COMUM,
+    mochila: { 'Ultra Ball': 79492 },
+    mochilaFechaAoLer: 2,
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 40000 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Nao consegui ler o inventário.');
 });
 
 test('sem botao de inventario, diz que nao achou em vez de calar', async () => {

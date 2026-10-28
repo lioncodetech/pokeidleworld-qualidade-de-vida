@@ -368,6 +368,14 @@ PPX.modulo(
         const v = parseInt(String(fonte).replace(/\D/g, ''), 10);
         conta[nome] = Number.isFinite(v) ? v : null;
       }
+      // A mochila fecha-se sozinha quando o personagem anda, como a loja. Medido na conta do
+      // dono em 28/10/2026, com o ciclo a correr: ela abriu com 30 slots e meio segundo depois
+      // estava fechada, e a leitura apanhou a janela ainda de pe' com os slots ja' fora —
+      // devolveu zero de tudo. Saiu "Ultra Ball: 79492 → 0" e a compra seguinte quis 38849
+      // Ultra Balls que ja' estavam na bolsa. Por isso confere-se a janela DEPOIS de ler: um
+      // item que falta e' zero, mas uma mochila que fechou a meio nao e' zero de nada — e' uma
+      // leitura que nao vale, e quem nao sabe quanto tem nao compra a diferenca.
+      if (!janelaInv()) return null;
       return conta;
     }
 

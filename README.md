@@ -258,6 +258,15 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
+**A mochila fecha-se sozinha enquanto se lê, e isso saía como zero.** Medido com o ciclo a
+correr em 28/10/2026: a mochila abriu com 30 slots e meio segundo depois estava fechada — o jogo
+fecha-a quando o personagem anda, tal como faz à loja. A leitura apanhava a janela ainda de pé e
+os slots já fora, e devolvia zero de tudo; saía *"Ultra Ball: 79492 → 0"* e a compra seguinte
+pedia 38 849 Ultra Balls que já estavam na bolsa. Agora confere-se a janela **depois** de ler: um
+item que falta é zero, mas uma mochila que fechou a meio não é zero de nada — é uma leitura que
+não vale. Zero slots, só por si, continua a poder ser uma mochila vazia de verdade, e por isso
+não serve de critério.
+
 **A mochila também abre antes de desenhar, e isso saía como zero.** A conferência que corre logo
 depois das compras encontrava a `.inv-window` já aberta e os `.inv-slot` ainda não, e o relatório
 final saía todo a zero: *"Ultra Ball: 79492 → 0 (+-79492)"*, com 79 mil Ultra Balls na mochila.

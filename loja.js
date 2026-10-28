@@ -42,6 +42,27 @@ PPX.modulo(
       /^Legendary Golden Ticket$/i,
     ];
 
+    /**
+     * O nome do item sem acento, que e' como a lista protegida o escreve.
+     *
+     * Medido no Deposito da Familia em 28/10/2026: a tela diz "Rare Pokémon Picture", com `é`
+     * (U+00E9), e a lista diz `Rare Pokemon Picture`. Esses dois nao casam, e o que nao casa nao
+     * esta' protegido — a defesa falhava exatamente no item que ela nomeia. Tira-se o acento dos
+     * dois lados em vez de escrever o acento na lista: assim tambem serve para o jogo em ingles,
+     * que escreve o mesmo nome sem ele.
+     *
+     * So' o acento sai. Emoji e pontuacao ficam de proposito: nao medi nenhum nome de item com
+     * eles, e tirar o que nao se mediu e' alargar a peneira no caminho que nao tem volta.
+     */
+    const semAcento = (t) =>
+      String(t || '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .trim();
+
+    /** Este item esta' na lista que nunca se vende? */
+    const itemProtegido = (nome) => ITENS_PROTEGIDOS.some((re) => re.test(semAcento(nome)));
+
     // Pausa entre cliques de compra. O jogo debita no mesmo tick, mas martelar um botao de
     // compra sem respiro e' pedir para o servidor achar que e' ataque.
     const PAUSA_COMPRA = 140;
@@ -122,16 +143,28 @@ PPX.modulo(
       return Number.isFinite(v) ? v : null;
     };
 
-    // Nome interno da aba -> rotulo do nucleo. O nome interno continua em portugues porque
-    // tambem e' o que aparece nos avisos do painel.
-    const ROTULO_DA_ABA = { 'Pokémon': 'abaPokemon', Comprar: 'comprar', Vender: 'vender' };
+    // Nome interno da aba -> aba do jogo. O nome interno continua em portugues porque tambem e'
+    // o que aparece nos avisos do painel — e porque ele deixou de ser o nome que o jogo usa.
+    //
+    // Os itens tinham aba propria, "🎒 Itens", e deixaram de ter. Medido na Loja do Mark em
+    // 28/10/2026: as abas sao "🛒 Comprar", "💰 Vender", "🐾 Pokémon" e "↩️ Recompra", e e' na de
+    // Vender que os itens se vendem. Procurar por "Itens" nao achava nada, e a venda de itens
+    // morria em "aba Itens indisponível" — sem erro nenhum, so' nao vendia. Por isso o nome do
+    // jogo mora aqui, numa tabela, e nao no nome com que se chama a rotina.
+    const ABAS = {
+      'Pokémon': { rotulo: 'abaPokemon', antigo: /\bPok[ée]mon\b/i },
+      Itens: { rotulo: 'vender', antigo: /\b(Vender|Sell)\b/i },
+      Comprar: { rotulo: 'comprar', antigo: /\b(Comprar|Buy)\b/i },
+    };
 
     const abrirAba = async (rotulo) => {
       const j = janela();
       if (!j) return false;
-      const nome = ROTULO_DA_ABA[rotulo];
+      const aba = ABAS[rotulo];
       const t = [...j.querySelectorAll('.nsh-tab')].find((x) =>
-        nome ? eRotuloDe(nome, x.textContent, new RegExp(rotulo), true) : x.textContent.includes(rotulo),
+        aba
+          ? eRotuloDe(aba.rotulo, x.textContent, aba.antigo, true)
+          : x.textContent.includes(rotulo),
       );
       if (!t) return false;
       if (!String(t.className).includes('on')) {
@@ -563,6 +596,73 @@ PPX.modulo(
       return m ? parseInt(m[1], 10) : null;
     };
 
+    // --- a lista virtual ---------------------------------------------------------------------
+    //
+    // A lista de venda deixou de desenhar tudo. Medido na Loja do Mark em 28/10/2026, com 288
+    // pokemon a vender: existiam **12** `.mks-row` no DOM, a caixa `.mks-list` tinha 347 px de
+    // altura visivel para 17600 px de rolagem, e rolar nao aumentava o numero de linhas — o jogo
+    // recicla os mesmos nos.
+    //
+    // O estrago era este: "Selecionar tudo" marca a lista INTEIRA, do lado do jogo, e a tela so'
+    // mostra uma dezena. A auditoria cruzava os dois numeros, via 288 contra 12, e parava. A
+    // trava estava certa; o que estava errado era querer vender tudo de uma vez.
+    //
+    // A saida e' vender por paginas. Cada pagina e' o que esta' desenhado agora: marca-se so'
+    // isso, confere-se que a conta do jogo bate com as linhas que se ve, vende-se, e a lista
+    // encolhe. A conferencia cruzada continua inteira — passa a valer por pagina, que e' o unico
+    // tamanho em que ela pode valer.
+
+    /** A caixa que rola, lida a partir de uma linha. `null` sem lista na tela. */
+    const caixaDaLista = () => janela()?.querySelector('.mks-row')?.parentElement || null;
+
+    /** As linhas desenhadas agora — com lista virtual, so' a janela visivel. */
+    const linhasNaTela = () => [...(janela()?.querySelectorAll('.mks-row') || [])];
+
+    /** Esta linha pode ser vendida? Pokemon pela grade, itens pelo nome. */
+    const permitida = (linha, aba) =>
+      aba === 'Pokémon'
+        ? !grade(linha)
+        : !itemProtegido(linha.querySelector('.mks-name')?.textContent);
+
+    /**
+     * O botao que marca e desmarca tudo — que e' UM so', e troca de nome.
+     *
+     * Medido: "☐ Selecionar tudo" com nada marcado, "☑ Desmarcar tudo" com algo marcado. Quem
+     * procurasse so' o primeiro nome perdia o botao justamente quando precisa dele.
+     */
+    const alternadorDeSelecao = () =>
+      [...(janela()?.querySelectorAll('button') || [])].find(
+        (b) =>
+          eRotuloDe('selecionarTudo', b.textContent, /Selecionar tudo|Select all/i, true) ||
+          eRotuloDe('desmarcarTudo', b.textContent, /Desmarcar tudo|Deselect all/i, true),
+      ) || null;
+
+    /**
+     * Zera a selecao do jogo, inclusive o que esta' fora da tela — e diz se conseguiu.
+     *
+     * Desmarcar linha a linha NAO serve, e isto custou um susto: depois de uma auditoria, 288
+     * pokemon ficaram marcados do lado do jogo enquanto a tela mostrava doze. Desmarcar os doze
+     * deixou 276 marcados, invisiveis, prontos para serem vendidos pelo clique seguinte.
+     *
+     * O unico caminho que limpa tudo e' o alternador, medido em 28/10/2026:
+     *
+     *     11 marcados · "☐ Selecionar tudo" -> clique -> 288 · "☑ Desmarcar tudo" -> clique -> 0
+     *
+     * Ou seja: com algo marcado, um clique pode marcar tudo em vez de limpar. O segundo clique
+     * e' que limpa. Por isso se clica ate' a conta do jogo dar zero, e nao um numero fixo de
+     * vezes.
+     */
+    async function limparSelecao() {
+      for (let i = 0; i < 4; i += 1) {
+        if (!contagemDoJogo()) return true;
+        const b = alternadorDeSelecao();
+        if (!b) return false;
+        b.click();
+        await esperar(900);
+      }
+      return !contagemDoJogo();
+    }
+
     /**
      * A verificacao que importa, e ela nao confia no filtro.
      *
@@ -576,7 +676,7 @@ PPX.modulo(
       const proibidos = linhas.filter((r) =>
         aba === 'Pokémon'
           ? grade(r)
-          : ITENS_PROTEGIDOS.some((re) => re.test((r.querySelector('.mks-name')?.textContent || '').trim())),
+          : itemProtegido(r.querySelector('.mks-name')?.textContent),
       );
       const doJogo = contagemDoJogo();
       return {
@@ -591,6 +691,16 @@ PPX.modulo(
       };
     }
 
+    /**
+     * Deixa UMA pagina pronta para vender: a que esta' desenhada agora.
+     *
+     * Era "deixa a lista toda pronta", e deixou de poder ser desde que a lista virou virtual —
+     * ver a nota da lista virtual acima. Quem vende a lista inteira chama isto em laco, uma vez
+     * por pagina, que e' o que `venderAba` faz.
+     *
+     * `vazia: true` quer dizer "nao ha' nada para marcar nesta pagina" — ou a lista acabou, ou a
+     * pagina e' toda protegida. E' diferente de erro: quem chamou rola e segue.
+     */
     async function prepararVenda(aviso, aba = 'Pokémon') {
       if (!(await abrirAba(aba))) return { ok: false, motivo: `aba ${aba} indisponível` };
 
@@ -615,27 +725,43 @@ PPX.modulo(
       if (teimosas.length)
         return { ok: false, motivo: `o filtro nao desligou: ${teimosas.join(', ')}` };
 
-      // 2. marca tudo o que sobrou
-      const sel = [...janela().querySelectorAll('button')].find((b) =>
-        eRotuloDe('selecionarTudo', b.textContent, /Selecionar tudo/, true),
-      );
-      if (sel) {
-        sel.click();
+      // 2. parte de zero. O que sobrou marcado de antes pode estar fora da tela, e vender o que
+      // nao se viu e' o engano que nao se desfaz.
+      if (!(await limparSelecao()))
+        return { ok: false, motivo: 'nao consegui desmarcar o que ja estava selecionado' };
+
+      // 3. marca a pagina que esta' na tela
+      const linhas = linhasNaTela();
+      if (!linhas.length) return { ok: false, motivo: 'nada selecionado', vazia: true };
+
+      // Com a lista inteira desenhada — e' o caso dos itens, 67 linhas para 67 — o alternador
+      // faz num clique o que sessenta e sete fariam. So' vale se o jogo marcar exatamente o que
+      // se ve: com lista virtual ele marca o resto tambem, e ai' este atalho nao serve.
+      let aproveitou = false;
+      const alt = alternadorDeSelecao();
+      if (alt) {
+        alt.click();
         await esperar(900);
+        aproveitou = (contagemDoJogo() || 0) === linhas.length;
+        if (!aproveitou && !(await limparSelecao()))
+          return { ok: false, motivo: 'nao consegui desmarcar o que o jogo marcou' };
       }
 
-      // 3. audita o que ficou marcado, e desmarca um a um o que nao devia estar
-      let a = auditar(aba);
-      if (a.proibidos.length) {
-        if (aviso) aviso(`${a.proibidos.length} protegidos marcados: desmarcando`);
-        for (const p of a.proibidos) {
-          p.linha.querySelector('.mks-check')?.click();
-          await esperar(220);
+      if (aviso && !aproveitou) aviso(`Marcando ${linhas.length} nesta página…`);
+      for (const l of linhas) {
+        const c = l.querySelector('.mks-check');
+        if (!c) continue;
+        const quero = permitida(l, aba);
+        // No atalho so' ha' que tirar os protegidos; sem ele, marca-se um a um.
+        if (aproveitou ? !quero && c.checked : quero !== !!c.checked) {
+          c.click();
+          await esperar(140);
         }
-        await esperar(700);
-        a = auditar(aba);
       }
+      await esperar(700);
 
+      // 4. audita: nenhum protegido marcado, e a conta do jogo igual a' da tela
+      const a = auditar(aba);
       if (a.proibidos.length)
         return {
           ok: false,
@@ -643,7 +769,7 @@ PPX.modulo(
         };
       if (a.divergente)
         return { ok: false, motivo: `o jogo conta ${a.doJogo}, a tela mostra ${a.total}` };
-      if (!a.total) return { ok: false, motivo: 'nada selecionado' };
+      if (!a.total) return { ok: false, motivo: 'nada selecionado', vazia: true };
 
       return { ok: true, total: a.total };
     }
@@ -916,24 +1042,76 @@ PPX.modulo(
      * marcado, e a conta do jogo igual a' da tela. Qualquer uma falhando, nao se vende nada. O
      * teto e' a ultima trava: um numero inesperadamente grande e' sinal de que algo mudou.
      */
+    // Quantas paginas no maximo, por aba. Com uma dezena de linhas por pagina isto da' folga de
+    // sobra para listas de centenas, e e' a rede para o caso de a lista nunca encolher: sem ele,
+    // uma pagina que se recusasse a sair rodaria para sempre.
+    const TETO_DE_PAGINAS = 60;
+
     async function venderAba(aba, aviso = () => {}) {
       if (!janela()) return 'Loja fechada: nao vendi.';
-      const r = await prepararVenda(aviso, aba);
-      if (!r.ok) return `Venda parada: ${r.motivo}. Nada foi vendido.`;
+      if (!(await abrirAba(aba)))
+        return `Venda parada: aba ${aba} indisponível. Nada foi vendido.`;
 
-      const bt = [...janela().querySelectorAll('button')].find((x) => {
-        const t = (x.textContent || '').trim();
-        return /\(\d+\)/.test(t) && eRotuloDe('vender', t, /^Vender\s*\(/, true);
-      });
-      if (!bt) return 'Nao achei o botao de vender.';
-      const rotulo = bt.textContent.trim();
-      bt.click();
-      await esperar(1200);
+      let vendidos = 0;
+      let paginas = 0;
+      let topo = 0;
+      let motivo = '';
 
-      const conf = await confirmar(r.total);
-      if (conf.cancelou) return conf.motivo;
-      // Tira o verbo (Vender/Sell/…) e deixa so' o "(73) · 1.314.000".
-      return `${aba}: Vendidos ${rotulo.replace(/^[^(]*/, '')}`;
+      while (paginas < TETO_DE_PAGINAS) {
+        const caixa = caixaDaLista();
+        if (caixa) {
+          caixa.scrollTop = topo;
+          await esperar(700);
+        }
+        if (!linhasNaTela().length) break;
+
+        const r = await prepararVenda(aviso, aba);
+        if (!r.ok) {
+          // Pagina sem nada que se possa vender: rola e segue. So' isto justifica continuar —
+          // qualquer outro motivo e' a auditoria a dizer para parar, e ai' para-se.
+          const avanco = caixa?.clientHeight || 0;
+          if (r.vazia && avanco > 0 && topo + avanco < caixa.scrollHeight) {
+            topo += avanco;
+            paginas += 1;
+            continue;
+          }
+          if (!r.vazia) motivo = r.motivo;
+          break;
+        }
+
+        const bt = [...janela().querySelectorAll('button')].find((x) => {
+          const t = (x.textContent || '').trim();
+          return /\(\d+\)/.test(t) && eRotuloDe('vender', t, /^Vender\s*\(/, true);
+        });
+        if (!bt) {
+          motivo = 'nao achei o botao de vender';
+          break;
+        }
+        const rotulo = bt.textContent.trim();
+        bt.click();
+        await esperar(1200);
+
+        const conf = await confirmar(r.total);
+        if (conf.cancelou) {
+          motivo = conf.motivo;
+          break;
+        }
+        vendidos += r.total;
+        paginas += 1;
+        // Tira o verbo (Vender/Sell/…) e deixa so' o "(12) · 230.000".
+        aviso(`${aba}: página ${paginas} — vendidos ${rotulo.replace(/^[^(]*/, '')}`);
+        // A lista encolheu: o topo voltou a ter o que vender, e rolar seria pular linhas.
+        topo = 0;
+        await esperar(1200);
+      }
+
+      if (!vendidos)
+        return motivo
+          ? `Venda parada: ${motivo}. Nada foi vendido.`
+          : `${aba}: nada para vender.`;
+      return `${aba}: Vendidos ${vendidos} em ${paginas} página(s).${
+        motivo ? ` Parei depois: ${motivo}.` : ''
+      }`;
     }
 
     const venderAgora = (aviso = () => {}) => venderAba('Pokémon', aviso);
@@ -1016,7 +1194,9 @@ PPX.modulo(
           diz(`Parado: ${r.motivo}. Nada foi vendido.`);
           return;
         }
-        diz(`${r.total} prontos, nenhum protegido marcado. Clique em Vender no jogo.`);
+        diz(
+          `${r.total} prontos nesta página, nenhum protegido marcado. Clique em Vender no jogo.`,
+        );
       } finally {
         if (soltar) soltar();
         ocupado = false;

@@ -51,6 +51,9 @@ function deposito({
   travado = false,
   semAba = false,
   semJanela = false,
+  // A cota diaria de trocas com a Familia, como o jogo a mostra em `.fam-quota`. `null` e' a
+  // tela que nao traz esse cabecalho — e' o padrao porque e' o que os testes antigos mediram.
+  cota = null,
   // Chamado sempre que alguem vem do Box para a equipe: e' por aqui que o teste faz chegar um
   // pokemon caido, que e' o caso que a cura so'-antes nao cobriria.
   aoTrazer = () => {},
@@ -195,8 +198,11 @@ function deposito({
 
   const janela = {
     getBoundingClientRect: () => ({ left: 0, width: 600 }),
-    querySelector: (sel) =>
-      sel === '.fam-cols' && abaAtiva === 'itens' ? { className: 'fam-cols' } : null,
+    querySelector: (sel) => {
+      if (sel === '.fam-quota')
+        return cota ? { textContent: `${cota.usados}/${cota.teto} movimentos hoje` } : null;
+      return sel === '.fam-cols' && abaAtiva === 'itens' ? { className: 'fam-cols' } : null;
+    },
     querySelectorAll: (sel) => {
       if (sel === '.fam-cols .fam-col' && abaAtiva === 'itens' && familiaEstrutura)
         return [colItens('itens'), colItens('familiaItens')];
@@ -714,6 +720,65 @@ test('guarda no deposito da familia somente os itens protegidos', async () => {
   assert.deepEqual(r.movidos, protegidos.map((x) => x.nome));
   assert.deepEqual(p.dep.est.itens, comuns, 'itens comuns continuaram na bolsa');
   assert.deepEqual(p.dep.est.familiaItens, protegidos, 'todos os protegidos foram para a família');
+});
+
+// --- o acento e a cota diaria, medidos no jogo em 28/10/2026 ------------------------------------
+
+test('Rare Pokemon Picture com acento e o mesmo item da lista protegida', async () => {
+  // A tela escreve "Rare Pokémon Picture", com `é` (U+00E9); a lista escreve sem acento. Antes
+  // deste conserto o item que da' nome a' regra escapava dela e ia a' venda.
+  const picture = { nome: 'Rare Pokémon Picture', qtd: 134 };
+  const comum = { nome: 'Bone', qtd: 18 };
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: [picture, comum] } });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Rare Pokémon Picture']);
+  assert.deepEqual(p.dep.est.itens, [comum]);
+  assert.deepEqual(p.dep.est.familiaItens, [picture]);
+});
+
+test('para antes de comecar quando a cota de hoje nao chega para todos', async () => {
+  const protegidos = [
+    { nome: 'Poke Card Pack', qtd: 10 },
+    { nome: 'Devoted Token', qtd: 532 },
+    { nome: 'Bronze Boss Token', qtd: 1 },
+  ];
+  const p = montar({
+    dep: { equipe: SEIS, box: BOX, itens: [...protegidos], cota: { usados: 98, teto: 100 } },
+  });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /mais 2 movimento/);
+  assert.match(r.erro, /3 item\(ns\) protegido/);
+  assert.deepEqual(r.movidos, [], 'nao moveu nada: mover metade deixaria o resto a' + ' venda');
+  assert.deepEqual(p.dep.est.familiaItens, []);
+});
+
+test('com cota de sobra guarda tudo, como antes', async () => {
+  const protegidos = [{ nome: 'Poke Card Pack', qtd: 10 }, { nome: 'Devoted Token', qtd: 532 }];
+  const p = montar({
+    dep: { equipe: SEIS, box: BOX, itens: [...protegidos], cota: { usados: 3, teto: 100 } },
+  });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(r.movidos, ['Poke Card Pack', 'Devoted Token']);
+  assert.deepEqual(p.dep.est.itens, []);
+});
+
+test('cota ilegivel nao impede de proteger: nao saber nao e saber que acabou', async () => {
+  const token = { nome: 'Bronze Boss Token', qtd: 1 };
+  const p = montar({ dep: { equipe: SEIS, box: BOX, itens: [token], cota: null } });
+
+  const r = await p.api.protegerItensAqui(() => {});
+
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual(p.dep.est.familiaItens, [token]);
 });
 
 test('Bronze Boss Token sem contador nem classe de linha tambem e encontrado', async () => {

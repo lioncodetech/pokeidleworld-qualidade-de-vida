@@ -43,19 +43,24 @@ function no(cls, texto = '', extras = {}) {
 // O jogo tem seletor de idioma, e a mesma loja tem de dar o mesmo resultado em qualquer um.
 const EM = {
   pt: {
-    abas: ['🛒 Comprar', '💰 Vender', '🐾 Pokémon', '🎒 Itens'],
+    // Medido na Loja do Mark em 28/10/2026. A aba "🎒 Itens" NAO existe mais: os itens
+    // vendem-se na de Vender, e "↩️ Recompra" e' nova. A banca segue o jogo de hoje, senao o
+    // guarda defenderia uma loja que ja' nao existe.
+    abas: ['🛒 Comprar', '💰 Vender', '🐾 Pokémon', '↩️ Recompra'],
     grades: ['Fraca', 'Comum', 'Rara', 'Lendária', 'Mítica', 'Anciã', 'Divina'],
     vender: 'Vender',
     selecionarTudo: 'Selecionar tudo',
+    desmarcarTudo: 'Desmarcar tudo',
     cancelar: 'Cancelar',
     venderMesmoAssim: 'Vender mesmo assim',
     linhas: 'linha(s)',
   },
   en: {
-    abas: ['🛒 Buy', '💰 Sell', '🐾 Pokémon', '🎒 Items'],
+    abas: ['🛒 Buy', '💰 Sell', '🐾 Pokémon', '↩️ Buyback'],
     grades: ['Weak', 'Common', 'Rare', 'Legendary', 'Mythic', 'Ancient', 'Divine'],
     vender: 'Sell',
     selecionarTudo: 'Select all',
+    desmarcarTudo: 'Deselect all',
     cancelar: 'Cancel',
     venderMesmoAssim: 'Sell anyway',
     linhas: 'line(s)',
@@ -96,6 +101,10 @@ function montarLoja({
   dicaAtualFica = false,
   // Em que lingua o jogo esta': 'pt' ou 'en'. Os textos sairam do dicionario do proprio jogo.
   lingua = 'pt',
+  // A lista virtual, medida em 28/10/2026: com 288 pokemon a vender so' existiam 12 `.mks-row`
+  // no DOM, e a rolagem e' que dizia quais. `null` e' a lista inteira desenhada, que e' o que
+  // acontece quando ela cabe — 67 itens, 67 linhas.
+  porPagina = null,
 } = {}) {
   const L = EM[lingua];
   const compras = [];
@@ -108,10 +117,23 @@ function montarLoja({
   };
   janela.filhos.push(ouro);
 
+  // As abas sao de verdade: clicar troca a lista. Sem isto a banca tinha uma lista so' para
+  // todas elas, e um item protegido aparecia na passagem dos pokemon — onde a protecao que vale
+  // e' a da grade, nao a do nome.
+  let abaAtiva = L.abas[2]; // a de Pokémon, que e' onde a venda comeca
   for (const rot of L.abas) {
-    const t = no(rot === L.abas[0] ? 'nsh-tab on' : 'nsh-tab', rot);
+    const t = no('nsh-tab', rot);
+    Object.defineProperty(t, 'className', {
+      get: () => (rot === abaAtiva ? 'nsh-tab on' : 'nsh-tab'),
+    });
+    t.ehBotao = true;
+    t.aoClicar = () => {
+      abaAtiva = rot;
+    };
     janela.filhos.push(t);
   }
+  /** Em que aba esta': 'Pokémon' ou 'Itens', com o nome interno do modulo. */
+  const ondeEstou = () => (abaAtiva === L.abas[2] ? 'Pokémon' : 'Itens');
 
   for (const g of L.grades) {
     const b = no('mks-fgrade on', g);
@@ -179,14 +201,66 @@ function montarLoja({
     linha.marcar = (v) => {
       check.checked = v;
     };
+    linha.aba = l.aba || null;
     janela.filhos.push(linha);
     todasAsLinhas.push(linha);
   }
 
-  const btSelecionar = no('', `☐ ${L.selecionarTudo}`);
+  // --- a lista virtual -----------------------------------------------------------------------
+  //
+  // Medido em 28/10/2026: a caixa e' `.win-body.nsh-well.mks-list`, com 347 px visiveis para
+  // 17600 px de rolagem e ~61 px por linha. Rolar troca as linhas desenhadas; a selecao do que
+  // saiu da tela fica guardada do lado do jogo.
+  const ALTURA_DA_LINHA = 61;
+  // Uma linha sem `aba` mora em todas — e' o que a maioria dos testes quer. Quem declara `aba`
+  // so' aparece na dela, como no jogo.
+  const vivas = () =>
+    todasAsLinhas.filter((l) => !l.vendida && (!l.aba || l.aba === ondeEstou()));
+  const caixa = no('win-body nsh-well mks-list');
+  caixa.scrollTop = 0;
+  Object.defineProperty(caixa, 'scrollHeight', {
+    get: () => vivas().length * ALTURA_DA_LINHA,
+  });
+  Object.defineProperty(caixa, 'clientHeight', {
+    get: () => (porPagina || vivas().length) * ALTURA_DA_LINHA,
+  });
+  for (const l of todasAsLinhas) l.parentElement = caixa;
+
+  const naTela = () => {
+    const todas = vivas();
+    if (!porPagina) return todas;
+    const i = Math.floor(caixa.scrollTop / ALTURA_DA_LINHA);
+    return todas.slice(i, i + porPagina);
+  };
+
+  // `.mks-row` passa a responder pela tela, e nao pela lista toda — e' essa a diferenca que o
+  // modulo tem de aguentar. Tudo o resto continua a procurar nos filhos como antes.
+  const qsaDaJanela = janela.querySelectorAll.bind(janela);
+  const qsDaJanela = janela.querySelector.bind(janela);
+  janela.querySelectorAll = (sel) => (sel === '.mks-row' ? naTela() : qsaDaJanela(sel));
+  janela.querySelector = (sel) => (sel === '.mks-row' ? naTela()[0] || null : qsDaJanela(sel));
+
+  /** Vende o que estiver marcado — inclusive o que a tela nao mostra, como o jogo faz. */
+  const consumarVenda = () => {
+    for (const l of vivas())
+      if (l.querySelector('.mks-check').checked) {
+        l.vendida = true;
+        l.marcar(false);
+      }
+  };
+
+  // O botao que marca e desmarca e' UM so', e troca de nome: "☐ Selecionar tudo" com nada
+  // marcado, "☑ Desmarcar tudo" com algo marcado. Medido assim, e e' o que torna possivel
+  // limpar uma selecao que esta' fora da tela.
+  const btSelecionar = no('', '');
   btSelecionar.ehBotao = true;
+  const algoMarcado = () => vivas().some((l) => l.querySelector('.mks-check').checked);
+  Object.defineProperty(btSelecionar, 'textContent', {
+    get: () => (algoMarcado() ? `☑ ${L.desmarcarTudo}` : `☐ ${L.selecionarTudo}`),
+  });
   btSelecionar.aoClicar = () => {
-    for (const l of todasAsLinhas) l.marcar(true);
+    const marcar = !algoMarcado();
+    for (const l of vivas()) l.marcar(marcar);
   };
   janela.filhos.push(btSelecionar);
 
@@ -197,10 +271,14 @@ function montarLoja({
   const btVender = no('', L.vender);
   btVender.ehBotao = true;
   btVender.aoClicar = () => {
-    if (popupDiz === null) return; // venda direta, sem confirmacao
+    if (popupDiz === null) {
+      // venda direta, sem confirmacao
+      consumarVenda();
+      return;
+    }
     const n =
       popupDiz === 'igual'
-        ? todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length
+        ? vivas().filter((l) => l.querySelector('.mks-check').checked).length
         : popupDiz;
     // 'mudo' = o jogo reescreveu o aviso e deixou de dizer quantos sao
     const aviso =
@@ -218,17 +296,24 @@ function montarLoja({
     bs.ehBotao = true;
     bs.aoClicar = () => {
       confirmados.push(n);
+      consumarVenda();
       popup = null;
     };
     popup.filhos.push(bc, bs);
   };
   Object.defineProperty(btVender, 'textContent', {
     get() {
-      const n =
-        contagemDoJogo !== null
-          ? contagemDoJogo
-          : todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length;
-      return n ? `${L.vender} (${n}) · 💲${n * 100}` : L.vender;
+      // Conta TUDO o que esta' marcado, veja-se ou nao: e' isso que o jogo faz, e e' por isso
+      // que a conferencia cruzada tem de valer por pagina.
+      //
+      // Sem nada marcado o botao nao traz numero nenhum — medido: com zero selecionados ele le'
+      // so' "Vender". `contagemDoJogo` forca o numero para o caso em que o jogo e a tela
+      // discordam, mas so' depois de haver alguma coisa marcada: um numero que nao desce nem
+      // com tudo desmarcado seria outra avaria, nao esta.
+      const marcados = vivas().filter((l) => l.querySelector('.mks-check').checked).length;
+      const n = contagemDoJogo !== null ? contagemDoJogo : marcados;
+      if (!marcados || !n) return L.vender;
+      return `${L.vender} (${n}) · 💲${n * 100}`;
     },
   });
   janela.filhos.push(btVender);
@@ -424,7 +509,13 @@ function montarLoja({
     btVender,
     /** Os botoes de filtro de grade, para conferir quais ficaram ligados. */
     filtrosDeGrade: () => janela.filhos.filter((b) => String(b.className).includes('mks-fgrade')),
-    marcados: () => todasAsLinhas.filter((l) => l.querySelector('.mks-check').checked).length,
+    marcados: () => vivas().filter((l) => l.querySelector('.mks-check').checked).length,
+    /** O que saiu da lista por venda — e' aqui que se ve se a venda por paginas chegou ao fim. */
+    vendidas: () => todasAsLinhas.filter((l) => l.vendida).length,
+    rolar: (y) => {
+      caixa.scrollTop = y;
+    },
+    naTela: () => janela.querySelectorAll('.mks-row').length,
     confirmados,
     cancelados,
     popupAberto: () => !!popup,
@@ -1071,4 +1162,114 @@ test('a grade na linha vem no masculino, e tambem protege', async () => {
   const r = await p.api.prepararVenda(() => {});
   assert.equal(r.ok, false, 'tinha de parar: ha um lendario marcado');
   assert.match(r.motivo, /Mewtwo/);
+});
+
+// --- a aba dos itens e a lista virtual, medidas em 28/10/2026 ---------------------------------
+
+test('os itens vendem-se na aba "Vender": a aba "Itens" nao existe mais', async () => {
+  // O jogo tirou a aba "🎒 Itens" e passou os itens para a de Vender. Procurar pelo nome antigo
+  // devolvia nada, e a venda de itens morria em "aba Itens indisponível" sem vender um item —
+  // sem erro nenhum, que e' o jeito mais caro de falhar.
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [{ nome: 'Air Tank', preco: 1000, grade: 'Comum', aba: 'Itens' }],
+  });
+  const r = await p.api.venderTudo(() => {});
+  assert.doesNotMatch(r, /indispon/i, 'a aba dos itens tem de ser achada');
+  assert.equal(p.vendidas(), 1, 'vendeu o item');
+});
+
+test('item protegido nao vai junto na aba dos itens', async () => {
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [
+      { nome: 'Air Tank', preco: 1000, grade: 'Comum', aba: 'Itens' },
+      { nome: 'Devoted Token', preco: 9000, grade: 'Comum', aba: 'Itens' },
+    ],
+  });
+  await p.api.venderTudo(() => {});
+  const sobrou = p.linhas.filter((l) => !l.vendida).map((l) => l.querySelector('.mks-name').textContent);
+  assert.deepEqual(sobrou, ['Devoted Token'], 'o token protegido fica');
+});
+
+test('o acento nao tira o item da lista protegida', async () => {
+  // Medido no jogo em 28/10/2026: a tela escreve "Rare Pokémon Picture", com `é`, e a lista
+  // protegida escreve sem acento. Comparados crus, os dois nao casam — e o item que da' nome a'
+  // regra era vendido por ela.
+  const p = montarLoja({
+    dinheiro: 1000,
+    linhas: [
+      { nome: 'Air Tank', preco: 1000, grade: 'Comum', aba: 'Itens' },
+      { nome: 'Rare Pokémon Picture', preco: 9000, grade: 'Comum', aba: 'Itens' },
+    ],
+  });
+  await p.api.venderTudo(() => {});
+  const sobrou = p.linhas.filter((l) => !l.vendida).map((l) => l.querySelector('.mks-name').textContent);
+  assert.deepEqual(sobrou, ['Rare Pokémon Picture'], 'o acento nao desprotege');
+});
+
+test('lista virtual: vende por paginas ate acabar', async () => {
+  // 30 linhas, 12 por pagina: o jogo nunca desenha mais do que uma dezena, e e' por isso que a
+  // venda tem de ir por paginas em vez de "Selecionar tudo".
+  const linhas = Array.from({ length: 30 }, (_, i) => ({
+    nome: `Pupitar ${i}`,
+    preco: 32500,
+    grade: 'Comum',
+  }));
+  const p = montarLoja({ dinheiro: 1000, linhas, porPagina: 12 });
+  assert.equal(p.naTela(), 12, 'a tela so mostra uma pagina');
+  const r = await p.api.venderAgora(() => {});
+  assert.equal(p.vendidas(), 30, 'vendeu as trinta');
+  assert.match(r, /Vendidos 30 em 3 página/);
+});
+
+test('lista virtual: a conferencia cruzada vale por pagina, nao pela lista toda', async () => {
+  // O erro que isto evita: "Selecionar tudo" marca as 30 do lado do jogo e a tela mostra 12 —
+  // a auditoria via 30 contra 12 e parava, sem nunca vender nada.
+  const linhas = Array.from({ length: 30 }, (_, i) => ({
+    nome: `Pupitar ${i}`,
+    preco: 32500,
+    grade: 'Comum',
+  }));
+  const p = montarLoja({ dinheiro: 1000, linhas, porPagina: 12 });
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, true, 'a pagina tem de ficar pronta');
+  assert.equal(r.total, 12, 'uma pagina, nao a lista toda');
+  assert.deepEqual(p.confirmados, [], 'preparar nao vende');
+});
+
+test('lista virtual: o lendario fora da tela nao e vendido', async () => {
+  // O protegido que nasce na terceira pagina so e' visto quando se chega la. Marcar a lista
+  // toda de uma vez levava-o junto sem ninguem o ter olhado.
+  const linhas = Array.from({ length: 30 }, (_, i) => ({
+    nome: i === 25 ? 'Mewtwo' : `Pupitar ${i}`,
+    preco: 32500,
+    grade: i === 25 ? 'Lendário' : 'Comum',
+  }));
+  const p = montarLoja({ dinheiro: 1000, linhas, porPagina: 12 });
+  await p.api.venderAgora(() => {});
+  const sobrou = p.linhas.filter((l) => !l.vendida).map((l) => l.querySelector('.mks-name').textContent);
+  assert.deepEqual(sobrou, ['Mewtwo'], 'o lendario fica, as outras 29 vao');
+});
+
+test('lista virtual: limpa a selecao que ficou fora da tela antes de marcar', async () => {
+  // O susto de 28/10/2026: depois de uma auditoria ficaram 288 pokemon marcados do lado do
+  // jogo enquanto a tela mostrava doze. Desmarcar os doze deixava 276 invisiveis, prontos para
+  // o clique seguinte. So o alternador limpa tudo.
+  const linhas = Array.from({ length: 30 }, (_, i) => ({
+    nome: i < 3 ? 'Mewtwo' : `Pupitar ${i}`,
+    preco: 32500,
+    grade: i < 3 ? 'Lendário' : 'Comum',
+  }));
+  const p = montarLoja({ dinheiro: 1000, linhas, porPagina: 12 });
+  // Deixa TUDO marcado de antes, lendarios inclusive, e rola para longe deles.
+  for (const l of p.linhas) l.marcar(true);
+  p.rolar(12 * 61);
+  const r = await p.api.prepararVenda(() => {});
+  assert.equal(r.ok, true, 'tinha de conseguir partir de zero');
+  assert.equal(p.marcados(), r.total, 'so ficou marcado o que a tela mostra');
+  assert.ok(
+    p.linhas.slice(0, 3).every((l) => !l.querySelector('.mks-check').checked),
+    'os lendarios fora da tela foram desmarcados',
+  );
 });

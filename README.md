@@ -223,8 +223,28 @@ O jogo já faz quase tudo: filtro por grade, checkbox por linha, "Selecionar tud
 anuncia o estrago antes de acontecer — `Vender (73) · 💲1.314.000`. O que falta é não depender da
 sua memória para aplicar os filtros certos toda vez.
 
-A preparação manual aplica o filtro, marca tudo, **audita, e para**. No ciclo automático, a mesma
-auditoria é feita antes de cada venda e o clique só acontece se todas as conferências baterem.
+A preparação manual aplica o filtro, marca **a página que está na tela**, audita, e para. No ciclo
+automático, a mesma auditoria é feita antes de cada venda e o clique só acontece se todas as
+conferências baterem.
+
+**A lista dos Pokémon é virtual**, e isso muda a venda inteira. Medido em 28/10/2026: o jogo
+desenha ~12 linhas de cada vez e recicla os nós, enquanto a seleção de verdade — 165, 288 — vive
+fora do DOM. Enquanto a ferramenta tentou preparar a lista toda, a conferência cruzada via "o jogo
+conta 165, a tela mostra 12" e parava com razão: ela não tinha como auditar o que não estava
+desenhado. Então vende-se **por páginas**: zera a seleção, marca a página visível, audita essas
+doze, vende, e recomeça do topo com a lista já encolhida. A conferência cruzada continua inteira —
+passou a valer por página, que é o único tamanho em que ela pode valer.
+
+**Desmarcar linha a linha não desmarca nada.** O botão de seleção é um só e troca de nome —
+"☐ Selecionar tudo" quando não está tudo marcado, "☑ Desmarcar tudo" quando está — e só ele limpa
+o que ficou fora da tela. Custou um susto: depois de uma auditoria ficaram 288 Pokémon marcados do
+lado do jogo com a tela a mostrar doze. É por isso que toda preparação começa por zerar a seleção
+antes de marcar o que quer que seja.
+
+**As abas mudaram.** Os itens tinham aba própria, "🎒 Itens", e deixaram de ter: hoje são
+"🛒 Comprar", "💰 Vender", "🐾 Pokémon" e "↩️ Recompra", e é na de Vender que os itens se vendem.
+Procurar por "Itens" não achava nada e a venda de itens morria sem erro nenhum — só não vendia.
+O nome do jogo saiu do nome da rotina e foi para uma tabela, que é onde ele pode mudar sozinho.
 
 **A auditoria não confia no filtro.** Desligar as grades altas e torcer para a lista ter
 atualizado é confiar num render. Em vez disso ela lê a grade de cada linha que ficou marcada
@@ -238,13 +258,22 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
+**O acento não desprotege.** A tela escreve `Rare Pokémon Picture`, com `é`, e a lista escreve sem
+acento: comparados crus, os dois não casam, e o item que dá nome à regra escapava dela. Os nomes
+passam por um `semAcento` antes da comparação, nos dois lados. Só o acento sai — emoji e pontuação
+ficam, porque `Item #592` depende do `#` para ser reconhecido.
+
 ## O ciclo (Alt+K)
 
 Faz a volta inteira sozinho:
 
 1. anota onde você está (`.phud-tloc` diz a caçada atual);
 2. volta para Cerulean e abre **Depósito → Família: Itens**;
-3. move somente os sete tipos de item protegidos para o depósito da família;
+3. move somente os oito tipos de item protegidos para o depósito da família — e **confere a cota
+   do dia antes de mover o primeiro**: o jogo limita as trocas com a família (`.fam-quota` diz
+   "3/100 movimentos hoje") e, se o que resta não chega para todos, o ciclo para sem mover nada.
+   Mover metade é o pior dos mundos: deixa o resto na bolsa, e é logo a seguir que se vende. Não
+   conseguir ler a cota não bloqueia nada — não saber não é saber que acabou;
 4. entra no mercado, anda para o norte até o Mark e abre a loja;
 5. vende Pokémon de Épica para baixo e depois os itens restantes, sempre com auditoria;
 6. compra cada item até o estoque alvo, usando a quantidade exata do tooltip da mochila;

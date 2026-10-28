@@ -138,6 +138,12 @@
     mercado: ['Open Market', 'Abrir Mercado', 'Abrir Market'], // openMarket
     curarEquipe: ['Heal team', 'Curar equipe', 'Curar equipo'], // healTeam
     selecionarTudo: ['Select all', 'Selecionar tudo', 'Seleccionar todo'], // selectAll
+    // O MESMO botao, com o outro nome. Ele troca de rotulo conforme o estado — medido na Loja
+    // do Mark em 28/10/2026: "☐ Selecionar tudo" com nada marcado, "☑ Desmarcar tudo" com algo
+    // marcado. Quem so' conhecesse o primeiro nome perdia o botao exatamente quando precisa
+    // dele: para desmarcar. So' a forma portuguesa foi medida; as outras seguem o padrao das
+    // vizinhas.
+    desmarcarTudo: ['Deselect all', 'Desmarcar tudo', 'Deseleccionar todo'], // deselectAll
     vender: ['Sell', 'Vender'], // sellBtn
     comprar: ['Buy', 'Comprar', 'Adquirir'], // buyBtn
     itens: ['Items', 'Itens', 'Objetos'], // tabItems

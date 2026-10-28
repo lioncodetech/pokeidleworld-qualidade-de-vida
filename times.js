@@ -150,7 +150,20 @@ PPX.modulo(
       /^Bronze Boss Token$/i,
       /^Legendary Golden Ticket$/i,
     ];
-    const protegido = (nome) => ITENS_PROTEGIDOS.some((re) => re.test(nome));
+    /**
+     * O nome sem acento, que e' como a lista protegida o escreve.
+     *
+     * Medido na aba Familia: Itens em 28/10/2026: a tela diz "Rare Pokémon Picture", com `é`
+     * (U+00E9), e a lista diz `Rare Pokemon Picture`. Sem isto o item que da' nome a' regra nao
+     * casava com ela. So' o acento sai: emoji e pontuacao ficam, porque `Item #592` depende do
+     * `#` para ser reconhecido.
+     */
+    const semAcento = (t) =>
+      String(t || '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .trim();
+    const protegido = (nome) => ITENS_PROTEGIDOS.some((re) => re.test(semAcento(nome)));
     // A API do Depósito nao manda o nome de alguns itens da bolsa. Na tela real eles aparecem
     // como `Item #6352` e `Item #70000`, embora o Inventário mostre os nomes normalmente.
     // IDs confirmados diretamente no jogo em 15/10/2026.
@@ -287,6 +300,31 @@ PPX.modulo(
     }
 
     /**
+     * Quantos movimentos ainda restam hoje no Depósito da Família — `null` se nao se soube ler.
+     *
+     * O jogo limita as trocas com a Familia por dia e mostra a conta no cabecalho da aba.
+     * Medido em 28/10/2026: `<span class="fam-quota">3/100 movimentos hoje</span>`, dentro de
+     * `.fam-head`. Le-se pelos dois numeros e nao pelas palavras, que mudam de idioma.
+     *
+     * Isto existe porque o laco que guarda os itens move um de cada vez e nao tinha teto nenhum.
+     * Num dia de bolsa cheia ele bateria na parede do jogo a meio, e o que ele saberia dizer era
+     * "a seta nao guardou" — uma queixa sobre o botao, quando o problema e' a cota. Pior: parar
+     * a meio deixa itens protegidos na bolsa, e e' logo a seguir que se vende.
+     *
+     * `null` nao bloqueia nada. Nao saber ler a cota nao e' saber que ela acabou, e recusar-se a
+     * proteger por causa de um `span` que mudou de nome seria trocar um risco por outro maior.
+     */
+    const movimentosRestantes = () => {
+      const t = janela()?.querySelector('.fam-quota')?.textContent || '';
+      const m = t.match(/(\d+)\s*\/\s*(\d+)/);
+      if (!m) return null;
+      const usados = parseInt(m[1], 10);
+      const teto = parseInt(m[2], 10);
+      if (!Number.isFinite(usados) || !Number.isFinite(teto)) return null;
+      return Math.max(0, teto - usados);
+    };
+
+    /**
      * Guarda no Depósito da Família apenas a lista fechada de itens protegidos.
      *
      * Esta porta nao pede a vez: o Ciclo ja' segura a fila inteira. Se um movimento nao se
@@ -313,10 +351,27 @@ PPX.modulo(
         `${protegidosLidos.length} protegido(s) encontrado(s)` +
         `${protegidosLidos.length ? `: ${protegidosLidos.join(', ')}` : '.'}`,
       );
+      const protegidosNaBolsa = protegidosLidos.length;
+      const restam = movimentosRestantes();
+      if (restam !== null && restam < protegidosNaBolsa)
+        return {
+          ok: false,
+          movidos: [],
+          erro:
+            `O Depósito da Família só aceita mais ${restam} movimento(s) hoje e há ` +
+            `${protegidosNaBolsa} item(ns) protegido(s) na bolsa. Parei antes da venda.`,
+        };
+
       while (true) {
         if (cancelado()) return { ok: false, movidos, erro: 'Ciclo interrompido.' };
         const linha = linhasDaBolsa().find((l) => protegido(nomeDoItem(l)));
         if (!linha) break;
+        if (movimentosRestantes() === 0)
+          return {
+            ok: false,
+            movidos,
+            erro: 'Acabaram os movimentos de hoje no Depósito da Família. Parei antes da venda.',
+          };
         const nome = nomeDoItem(linha);
         const antes = quantidadeDaLinha(linha);
         const seta = setaDaLinha(linha);

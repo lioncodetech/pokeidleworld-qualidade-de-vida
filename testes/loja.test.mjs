@@ -106,6 +106,11 @@ function montarLoja({
   // acontece quando ela cabe — 67 itens, 67 linhas.
   porPagina = null,
   popupFala = 'linhas',
+  // `listaAtrasada` e' a primeira abertura da loja, medida em 28/10/2026: a aba "🐾 Pokémon"
+  // ficou 2,2 a 2,7 s sem nenhuma `.mks-row` antes de desenhar as doze. O numero e' em
+  // milissegundos; `0` e' a lista que ja' esta' desenhada, que e' o caso de todos os outros
+  // testes.
+  listaAtrasada = 0,
 } = {}) {
   const L = EM[lingua];
   const compras = [];
@@ -227,7 +232,10 @@ function montarLoja({
   });
   for (const l of todasAsLinhas) l.parentElement = caixa;
 
+  const nascida = Date.now();
   const naTela = () => {
+    // Antes de a lista desenhar, o DOM nao tem linha nenhuma — nao tem "lista vazia", tem nada.
+    if (listaAtrasada && Date.now() - nascida < listaAtrasada) return [];
     const todas = vivas();
     if (!porPagina) return todas;
     const i = Math.floor(caixa.scrollTop / ALTURA_DA_LINHA);
@@ -706,6 +714,17 @@ const DOIS_COMUNS = [
   { nome: 'Venusaur', preco: 18000, grade: 'Comum' },
   { nome: 'Ivysaur', preco: 18000, grade: 'Comum' },
 ];
+
+test('espera a lista desenhar em vez de dizer "nada para vender"', async () => {
+  // Medido no jogo em 28/10/2026: na PRIMEIRA abertura da loja a aba "🐾 Pokémon" fica entre
+  // 2,2 e 2,7 s com zero `.mks-row` antes de desenhar. O ciclo decidia logo depois dos 700 ms de
+  // `abrirAba`, lia zero e dizia "Pokémon: nada para vender" — com 289 pokemon por vender, e sem
+  // erro nenhum a dizer que tinha olhado cedo demais.
+  const p = montarLoja({ dinheiro: 1000, linhas: DOIS_COMUNS, listaAtrasada: 2500 });
+  const r = await p.api.venderAgora(() => {});
+  assert.match(r, /Vendidos/, `disse "${r}" em vez de vender`);
+  assert.deepEqual(p.confirmados, [2]);
+});
 
 test('confirma o popup quando a conta dele bate com a nossa', async () => {
   const p = montarLoja({ dinheiro: 1000, linhas: DOIS_COMUNS });

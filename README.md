@@ -258,6 +258,21 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
+**A lista da loja demora a desenhar, e zero linhas não é lista vazia.** Na primeira abertura da
+loja a aba dos Pokémon fica entre **2,2 e 2,7 segundos** sem nenhuma `.mks-row` — medido em
+28/10/2026 — e só depois desenha. Quem decidia logo após os 700 ms da troca de aba lia zero e
+dizia *"Pokémon: nada para vender"*, com 289 por vender; na aba de Comprar o mesmo atraso
+aparecia com outro nome, *"o botão saiu do ar"*, e nada era comprado. Agora espera-se a lista
+aparecer, com teto de seis segundos. Na segunda troca de aba ela volta na hora, por isso a espera
+quase nunca custa nada.
+
+**O Mark podia ser o quinto NPC, e só se falava com quatro.** No Shopping há cinco "Conversar" na
+tela e o Mark era o mais distante do centro: o ciclo falava com o TM Researcher, o Stone
+Researcher, o Pokemaniac Trader e o Lead Scientist Trader, e desistia com *"não cheguei ao
+Mark"* — a loja a um clique. Andar não resolvia, porque a lista não depende de onde o personagem
+está e o clique na placa abre o diálogo mesmo com o NPC fora da tela. Fala-se agora com todos, do
+mais perto ao mais longe.
+
 **O popup de confirmação conta em Pokémon, não em "linhas".** A terceira fonte independente é o
 aviso que o jogo mostra antes de vender, e dele se tira *quantos* vão embora para comparar com a
 auditoria. Em 09/10/2026 ele dizia "68 linha(s)"; medido de novo em 28/10/2026 diz "Você vai

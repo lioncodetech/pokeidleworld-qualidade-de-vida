@@ -174,6 +174,30 @@ PPX.modulo(
       return true;
     };
 
+    /**
+     * Espera a lista da loja desenhar, e devolve quantas linhas apareceram.
+     *
+     * Trocar de aba nao e' instantaneo na PRIMEIRA abertura da loja: medido em 28/10/2026, a aba
+     * "🐾 Pokémon" ficou com zero `.mks-row` entre 2,2 e 2,7 segundos, e so' depois desenhou as
+     * doze. Quem decidia logo apos os 700 ms de `abrirAba` lia zero e concluia "nada para
+     * vender" — com 289 pokemon na lista. A mesma espera vale para a aba de Comprar, onde o
+     * mesmo atraso aparecia com outro nome: "o botao saiu do ar", e nenhum item comprado.
+     *
+     * Na segunda troca de aba a lista volta na hora, porque o jogo ja' a tem; por isso esta
+     * espera quase nunca custa nada. Uma lista de facto vazia paga o teto inteiro uma vez, e
+     * esse e' o preco de nao confundir "ainda nao desenhou" com "nao ha' nada".
+     */
+    const esperarLinhas = async (teto = 6000) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < teto) {
+        const n = janela()?.querySelectorAll('.mks-row').length || 0;
+        if (n) return n;
+        if (!janela()) return 0; // a loja fechou: esperar mais nao traz lista nenhuma
+        await esperar(200);
+      }
+      return janela()?.querySelectorAll('.mks-row').length || 0;
+    };
+
     const linhaDoItem = (nome) =>
       [...(janela()?.querySelectorAll('.mks-row') || [])].find(
         (r) => (r.querySelector('.mks-name')?.textContent || '').trim() === nome,
@@ -508,6 +532,7 @@ PPX.modulo(
      */
     async function comprar(nome, qtd, aviso) {
       if (!(await abrirAba('Comprar'))) return { comprou: 0, motivo: 'loja fechada' };
+      await esperarLinhas();
       if (!linhaDoItem(nome)) return { comprou: 0, motivo: 'item fora da loja' };
 
       const preco = parseInt(
@@ -703,6 +728,7 @@ PPX.modulo(
      */
     async function prepararVenda(aviso, aba = 'Pokémon') {
       if (!(await abrirAba(aba))) return { ok: false, motivo: `aba ${aba} indisponível` };
+      await esperarLinhas();
 
       // 1. desliga as grades protegidas, e confere que desligaram mesmo
       for (const nome of aba === 'Pokémon' ? PROTEGIDAS : []) {
@@ -1051,6 +1077,7 @@ PPX.modulo(
       if (!janela()) return 'Loja fechada: nao vendi.';
       if (!(await abrirAba(aba)))
         return `Venda parada: aba ${aba} indisponível. Nada foi vendido.`;
+      await esperarLinhas();
 
       let vendidos = 0;
       let paginas = 0;

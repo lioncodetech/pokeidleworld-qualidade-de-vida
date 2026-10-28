@@ -146,6 +146,16 @@ PPX.modulo(
      *
      * So "Conversar": "Usar maquina" e' a slot machine, e apostar por engano seria o pior jeito
      * possivel de descobrir que se clicou no NPC errado.
+     *
+     * Fala com TODOS, do mais perto ao mais longe, e nao so' com os quatro primeiros. O corte em
+     * quatro foi medido a falhar em 28/10/2026: no Shopping ha' cinco "Conversar" e o Mark era o
+     * quinto por distancia do centro — ficava de fora de todas as tentativas, e o ciclo desistia
+     * com "Nao cheguei ao Mark" depois de ter falado com o TM Researcher, o Stone Researcher, o
+     * Pokemaniac Trader e o Lead Scientist Trader. Andar nao resolvia: a lista nao depende de
+     * onde o personagem esta', e o clique na placa abre o dialogo mesmo com o NPC fora da tela.
+     * A ordem por distancia fica, porque acertar na primeira continua a poupar segundos; o que
+     * sai e' a desistencia antes de ter tentado. O teto de 12 existe so' para nao varrer um mapa
+     * inteiro de NPCs se um dia a tela mostrar dezenas.
      */
     async function acharMark() {
       const alvos = [...document.querySelectorAll('.npc-plate-btn')]
@@ -161,7 +171,7 @@ PPX.modulo(
           return { b, d: Math.hypot(dx, dy) };
         })
         .sort((a, z) => a.d - z.d)
-        .slice(0, 4);
+        .slice(0, 12);
 
       for (const { b } of alvos) {
         b.click();

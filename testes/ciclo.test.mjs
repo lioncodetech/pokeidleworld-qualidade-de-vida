@@ -66,6 +66,10 @@ function montar({
   parede = 99,
   markEm = 0,
   npcs = 3,
+  // `espalhar` poe os NPCs em distancias crescentes do centro, que e' como eles estao no mapa
+  // real. No arranjo padrao o ultimo NPC calha ser o MAIS perto do centro, e um teste sobre
+  // "o Mark e' o mais longe" passaria sozinho, sem provar nada.
+  espalhar = false,
   estoqueDe = {},
   loc = 'Route 1',
   lingua = 'pt',
@@ -80,7 +84,7 @@ function montar({
   const placas = [];
   for (let i = 0; i < npcs; i += 1) {
     const b = no('npc-plate-btn', L.conversar);
-    b.x = 100 + i * 50;
+    b.x = espalhar ? 500 + i * 200 : 100 + i * 50;
     b.y = 100;
     b.idx = i;
     b.aoClicar = () => {
@@ -246,6 +250,16 @@ test('reconhece o Mark pelo que o dialogo diz, nao pela posicao', async () => {
   const p = montar({ markEm: 2 });
   assert.equal(await p.api.acharMark(), true);
   assert.ok(p.falados.includes(2), 'chegou a falar com o Mark');
+});
+
+test('fala com o Mark mesmo quando ele e o quinto NPC mais perto', async () => {
+  // Medido no Shopping em 28/10/2026: cinco "Conversar" na tela e o Mark era o quinto por
+  // distancia do centro. Como so' se falava com os quatro primeiros, o ciclo dava a volta toda,
+  // falava com quatro NPCs errados e desistia com "Nao cheguei ao Mark" — a loja a um clique de
+  // distancia. Andar nao salvava: a lista nao muda com a posicao do personagem.
+  const p = montar({ npcs: 6, markEm: 5, espalhar: true });
+  assert.equal(await p.api.acharMark(), true);
+  assert.ok(p.falados.includes(5), 'chegou a falar com o Mark');
 });
 
 test('diz que nao achou quando nenhum NPC e o Mark', async () => {

@@ -111,6 +111,11 @@ function montarLoja({
   // milissegundos; `0` e' a lista que ja' esta' desenhada, que e' o caso de todos os outros
   // testes.
   listaAtrasada = 0,
+  // `slotsAtrasados` e' a mochila que abre antes de desenhar, medida na conferencia que corre
+  // logo depois das compras em 28/10/2026. Conta-se em CONSULTAS, e nao em milissegundos,
+  // porque a banca encurta todos os `setTimeout` para 1 ms: um atraso de relogio nunca
+  // aconteceria num teste. `0` e' a mochila ja' desenhada, que e' o caso de todos os outros.
+  slotsAtrasados = 0,
 } = {}) {
   const L = EM[lingua];
   const compras = [];
@@ -232,6 +237,7 @@ function montarLoja({
   });
   for (const l of todasAsLinhas) l.parentElement = caixa;
 
+  let consultasAosSlots = 0;
   const nascida = Date.now();
   const naTela = () => {
     // Antes de a lista desenhar, o DOM nao tem linha nenhuma — nao tem "lista vazia", tem nada.
@@ -415,7 +421,14 @@ function montarLoja({
       return casa(janela, sel) ? janela : janela.querySelector(sel);
     },
     querySelectorAll: (sel) => {
-      if (sel === '.inv-slot') return invAberto ? slots() : [];
+      if (sel === '.inv-slot') {
+        if (!invAberto) return [];
+        if (consultasAosSlots < slotsAtrasados) {
+          consultasAosSlots += 1;
+          return [];
+        }
+        return slots();
+      }
       if (sel === 'button') return semInventario ? [] : [btInv];
       return [];
     },
@@ -1022,6 +1035,21 @@ test('sem alvo nenhum, conferir ainda le a mochila e diz-se', async () => {
 
   assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Nenhum alvo de estoque definido.');
   assert.equal(p.aberturasDoInv(), 1);
+});
+
+test('espera a mochila desenhar antes de dizer quanto tem', async () => {
+  // Medido na conta do dono em 28/10/2026, na conferencia que corre logo depois das compras: a
+  // `.inv-window` ja' existia e os `.inv-slot` ainda nao, e o relatorio saiu todo a zero —
+  // "Ultra Ball: 79492 → 0 (+-79492)" com 79 mil na mochila. Ler cedo demais nao e' ler zero.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: COMUM,
+    mochila: { 'Ultra Ball': 79492 },
+    slotsAtrasados: 8,
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 40000 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Todos os alvos estao cheios.');
 });
 
 test('sem botao de inventario, diz que nao achou em vez de calar', async () => {

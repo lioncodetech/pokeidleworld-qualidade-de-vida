@@ -212,13 +212,29 @@ PPX.modulo(
 
     const janelaInv = () => document.querySelector('.inv-window');
 
+    /**
+     * Abre a mochila e so' devolve `true` quando ela esta' DESENHADA, e nao apenas aberta.
+     *
+     * A janela aparecer nao quer dizer que os slots ja' existam. Medido na conta do dono em
+     * 28/10/2026, na conferencia que corre logo depois das compras: a janela estava la' e os
+     * `.inv-slot` ainda nao, e o relatorio final saiu todo a zero — "Ultra Ball: 79492 → 0
+     * (+-79492)" com 79 mil Ultra Balls na mochila. Pior do que feio: uma compra decidida sobre
+     * esse zero compra o que ja' se tem.
+     *
+     * Espera-se pela janela e depois pelos slots. Uma mochila de facto vazia paga o teto uma
+     * vez, e esse e' o preco de nao confundir "ainda nao desenhou" com "nao tenho nada".
+     */
     async function abrirInventario() {
-      if (janelaInv()) return true;
-      const bt = porRotulo('inventario', /^Inventário$/);
-      if (!bt) return false;
-      bt.click();
-      // Espera a janela existir, nao um relogio: a mochila e' uma lista grande.
-      for (let i = 0; i < 12 && !janelaInv(); i += 1) await esperar(250);
+      if (!janelaInv()) {
+        const bt = porRotulo('inventario', /^Inventário$/);
+        if (!bt) return false;
+        bt.click();
+        // Espera a janela existir, nao um relogio: a mochila e' uma lista grande.
+        for (let i = 0; i < 12 && !janelaInv(); i += 1) await esperar(250);
+        if (!janelaInv()) return false;
+      }
+      for (let i = 0; i < 24 && janelaInv() && !document.querySelectorAll('.inv-slot').length; i += 1)
+        await esperar(250);
       return !!janelaInv();
     }
 

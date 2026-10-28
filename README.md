@@ -258,6 +258,12 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
+**A mochila também abre antes de desenhar, e isso saía como zero.** A conferência que corre logo
+depois das compras encontrava a `.inv-window` já aberta e os `.inv-slot` ainda não, e o relatório
+final saía todo a zero: *"Ultra Ball: 79492 → 0 (+-79492)"*, com 79 mil Ultra Balls na mochila.
+Pior do que feio — uma compra decidida sobre esse zero compra o que já se tem. Agora espera-se
+pelos slots, e não só pela janela.
+
 **A lista da loja demora a desenhar, e zero linhas não é lista vazia.** Na primeira abertura da
 loja a aba dos Pokémon fica entre **2,2 e 2,7 segundos** sem nenhuma `.mks-row` — medido em
 28/10/2026 — e só depois desenha. Quem decidia logo após os 700 ms da troca de aba lia zero e

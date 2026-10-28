@@ -258,6 +258,15 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
+**O popup de confirmação conta em Pokémon, não em "linhas".** A terceira fonte independente é o
+aviso que o jogo mostra antes de vender, e dele se tira *quantos* vão embora para comparar com a
+auditoria. Em 09/10/2026 ele dizia "68 linha(s)"; medido de novo em 28/10/2026 diz "Você vai
+vender 2 Pokémon por 💲65.000". Quem só conhecia "linha" não achava número nenhum e **cancelava
+toda venda de Pokémon** — a guarda a funcionar contra a venda que ela protege, e sem erro visível:
+só "o popup não disse quantos". Agora aceita-se o substantivo em qualquer das formas que o jogo
+usa, nos três idiomas, e **exige-se sempre um deles**: um número solto não serve, porque o preço
+também é um número e casaria com tudo. Se o número não bater com o auditado, continua a cancelar.
+
 **O acento não desprotege.** A tela escreve `Rare Pokémon Picture`, com `é`, e a lista escreve sem
 acento: comparados crus, os dois não casam, e o item que dá nome à regra escapava dela. Os nomes
 passam por um `semAcento` antes da comparação, nos dois lados. Só o acento sai — emoji e pontuação

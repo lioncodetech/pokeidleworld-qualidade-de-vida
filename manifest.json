@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Poke Idle World - qualidade de vida",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Captura, hunts por tipo, times, level cap e ciclo seguro com depósito, venda e reposição. Alt+Q abre o menu.",
   "permissions": [
     "storage"

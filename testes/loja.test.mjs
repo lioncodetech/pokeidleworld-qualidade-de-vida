@@ -105,6 +105,7 @@ function montarLoja({
   // no DOM, e a rolagem e' que dizia quais. `null` e' a lista inteira desenhada, que e' o que
   // acontece quando ela cabe — 67 itens, 67 linhas.
   porPagina = null,
+  popupFala = 'linhas',
 } = {}) {
   const L = EM[lingua];
   const compras = [];
@@ -280,11 +281,15 @@ function montarLoja({
       popupDiz === 'igual'
         ? vivas().filter((l) => l.querySelector('.mks-check').checked).length
         : popupDiz;
-    // 'mudo' = o jogo reescreveu o aviso e deixou de dizer quantos sao
+    // `popupFala` escolhe a redacao do aviso: 'linhas' e' a de 09/10/2026 ("68 linha(s)") e
+    // 'pokemon' a medida em 28/10/2026 ("Voce vai vender 2 Pokemon por ..."). O jogo trocou uma
+    // pela outra, e quem le' o popup tem de continuar a entender as duas.
     const aviso =
       popupDiz === 'mudo'
         ? '⚠️ CONFIRMAR VENDA DE POKÉMON\nConfira antes de prosseguir.'
-        : `⚠️ CONFIRMAR VENDA DE POKÉMON\nVocê selecionou TUDO: ${n} ${L.linhas}, por 💲${n * 18000}.`;
+        : popupFala === 'pokemon'
+          ? `⚠️ CONFIRMAR VENDA DE POKÉMON\nVocê vai vender ${n} Pokémon por 💲${n * 18000}:`
+          : `⚠️ CONFIRMAR VENDA DE POKÉMON\nVocê selecionou TUDO: ${n} ${L.linhas}, por 💲${n * 18000}.`;
     popup = no('mk-sellconfirm', aviso);
     const bc = no('nsh-btn nsh-btn-alt', L.cancelar);
     bc.ehBotao = true;
@@ -708,6 +713,29 @@ test('confirma o popup quando a conta dele bate com a nossa', async () => {
   assert.deepEqual(p.confirmados, [2], 'clicou em "Vender mesmo assim"');
   assert.deepEqual(p.cancelados, []);
   assert.match(r, /Vendidos/);
+});
+
+test('o popup que conta em Pokemon, e nao em linhas, tambem e entendido', async () => {
+  // Medido na Loja do Mark em 28/10/2026: o aviso deixou de dizer "68 linha(s)" e passou a dizer
+  // "Voce vai vender 2 Pokemon por ...". Quem so' conhecia "linha" nao achava numero nenhum e
+  // cancelava — a guarda virada contra a venda que ela devia proteger.
+  const p = montarLoja({ dinheiro: 1000, linhas: DOIS_COMUNS, popupFala: 'pokemon' });
+  const r = await p.api.venderAgora(() => {});
+  assert.deepEqual(p.confirmados, [2], 'clicou em "Vender mesmo assim"');
+  assert.deepEqual(p.cancelados, []);
+  assert.match(r, /Vendidos/);
+});
+
+test('o popup em Pokemon com numero diferente continua sendo cancelado', async () => {
+  // Entender a palavra nova nao pode custar a conferencia: se ele diz 68 e nos contamos 2, nao
+  // se vende, com a redacao que for.
+  const p = montarLoja({
+    dinheiro: 1000, linhas: DOIS_COMUNS, popupFala: 'pokemon', popupDiz: 68,
+  });
+  const r = await p.api.venderAgora(() => {});
+  assert.deepEqual(p.confirmados, []);
+  assert.deepEqual(p.cancelados, [68]);
+  assert.match(r, /68/);
 });
 
 test('cancela quando o popup declara um numero diferente do auditado', async () => {

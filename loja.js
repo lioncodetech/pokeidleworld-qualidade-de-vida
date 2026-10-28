@@ -1142,8 +1142,16 @@ PPX.modulo(
       }
       if (!caixa) return { cancelou: false, motivo: 'sem popup' };
 
+      // O que o popup conta mudou de palavra. Media em 09/10/2026 ele dizia "68 linha(s)"; medido
+      // de novo em 28/10/2026 diz "Você vai vender 2 Pokémon por 💲65.000". Quem so' conhecia
+      // "linha" nao achava numero nenhum e cancelava toda venda de pokemon — a guarda a funcionar
+      // contra a propria venda. Aceita-se o substantivo em qualquer das formas que o jogo usa,
+      // nos tres idiomas, e exige-se sempre um deles: um numero solto nao serve, porque o preco
+      // tambem e' um numero e casaria com tudo.
       const texto = caixa.innerText || '';
-      const achado = texto.match(/(\d+)\s*(?:linha|line|l[íi]nea)/i);
+      const achado = texto.match(
+        /(\d+)\s*(?:linha|line|l[íi]nea|pok[ée]mon|itens|items|item|objetos)/i,
+      );
       const diz = achado ? parseInt(achado[1], 10) : null;
 
       const porNome = (nomes, re) =>

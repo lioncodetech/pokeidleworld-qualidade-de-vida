@@ -116,6 +116,10 @@ function montarLoja({
   // porque a banca encurta todos os `setTimeout` para 1 ms: um atraso de relogio nunca
   // aconteceria num teste. `0` e' a mochila ja' desenhada, que e' o caso de todos os outros.
   slotsAtrasados = 0,
+  // `nomesAtrasados` e' o que se mede de facto no jogo, em 29/10/2026: os slots aparecem todos
+  // de uma vez e **sem nome**, porque as imagens ainda nao carregaram, e o `alt` so' enche
+  // umas centenas de milissegundos depois. Conta-se em consultas, pela mesma razao.
+  nomesAtrasados = 0,
   // `mochilaFechaAoLer` e' o jogo a fechar a mochila sozinho enquanto o personagem anda, medido
   // em 28/10/2026: ela abriu com 30 slots e meio segundo depois estava fechada. Conta-se em
   // consultas aos slots, porque a banca encurta todos os `setTimeout` para 1 ms.
@@ -243,6 +247,7 @@ function montarLoja({
 
   let consultasAosSlots = 0;
   let queda = false; // a mochila ja' perdeu os slots e esta' prestes a fechar
+  let consultasAosNomes = 0;
   const nascida = Date.now();
   const naTela = () => {
     // Antes de a lista desenhar, o DOM nao tem linha nenhuma — nao tem "lista vazia", tem nada.
@@ -412,7 +417,11 @@ function montarLoja({
           if (ev.type === 'mouseout' && !dicaAtualFica) dicaAtual = null;
         };
         s.querySelector = (sel) =>
-          sel === 'img' ? { alt: nome } : sel === '.inv-qty' ? qty : null;
+          sel === 'img'
+            ? { alt: consultasAosNomes > nomesAtrasados ? nome : '' }
+            : sel === '.inv-qty'
+              ? qty
+              : null;
         return s;
       });
     return slotsCache;
@@ -440,6 +449,7 @@ function montarLoja({
           return [];
         }
         consultasAosSlots += 1;
+        consultasAosNomes += 1;
         // A consulta que apanha a mochila a sair: os slots ja' nao estao la', a janela ainda
         // esta' — e e' SO' a seguir que ela fecha. Foi este instante que deu "79492 → 0".
         if (mochilaFechaAoLer && consultasAosSlots > mochilaFechaAoLer) {
@@ -1066,6 +1076,22 @@ test('espera a mochila desenhar antes de dizer quanto tem', async () => {
     linhas: COMUM,
     mochila: { 'Ultra Ball': 79492 },
     slotsAtrasados: 8,
+  });
+  p.api.cfg.tetos = { 'Ultra Ball': 40000 };
+
+  assert.equal(await p.api.conferirEstoque(), 'Mochila lida. Todos os alvos estao cheios.');
+});
+
+test('slot sem nome ainda nao e um slot: espera o alt encher', async () => {
+  // Medido na conta do dono em 29/10/2026, a cada 150 ms: aos 185 ms havia 30 `.inv-slot` e
+  // **nenhum com nome** — as imagens ainda nao tinham carregado —, e so' aos 495 ms e' que 20
+  // ganharam `alt`. A leitura caia nesse intervalo, nao achava item nenhum e dava zero de tudo:
+  // "Ultra Ball: 79492 → 0", e a compra seguinte pedia 38849 Ultra Balls que ja' la' estavam.
+  const p = montarLoja({
+    dinheiro: 100000,
+    linhas: COMUM,
+    mochila: { 'Ultra Ball': 79492 },
+    nomesAtrasados: 6,
   });
   p.api.cfg.tetos = { 'Ultra Ball': 40000 };
 

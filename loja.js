@@ -215,14 +215,17 @@ PPX.modulo(
     /**
      * Abre a mochila e so' devolve `true` quando ela esta' DESENHADA, e nao apenas aberta.
      *
-     * A janela aparecer nao quer dizer que os slots ja' existam. Medido na conta do dono em
-     * 28/10/2026, na conferencia que corre logo depois das compras: a janela estava la' e os
-     * `.inv-slot` ainda nao, e o relatorio final saiu todo a zero — "Ultra Ball: 79492 → 0
-     * (+-79492)" com 79 mil Ultra Balls na mochila. Pior do que feio: uma compra decidida sobre
-     * esse zero compra o que ja' se tem.
+     * A janela aparecer nao quer dizer que a mochila esteja legivel, e os slots existirem
+     * tambem nao. Medido na conta do dono em 29/10/2026, a cada 150 ms: aos 185 ms ja' havia
+     * **30 `.inv-slot` e nenhum com nome** — as imagens ainda nao tinham carregado e o `alt`
+     * estava vazio —, e so' aos 495 ms e' que 20 deles ganharam nome. A leitura caia nesse
+     * intervalo, nao encontrava item nenhum e dava zero de tudo: saiu "Ultra Ball: 79492 → 0"
+     * com 79 mil na bolsa, e a compra seguinte quis 38849 Ultra Balls que ja' la' estavam.
      *
-     * Espera-se pela janela e depois pelos slots. Uma mochila de facto vazia paga o teto uma
-     * vez, e esse e' o preco de nao confundir "ainda nao desenhou" com "nao tenho nada".
+     * Por isso nao se espera pelos slots: espera-se pelo primeiro slot com NOME, que e' o que a
+     * leitura procura. Esgotado o teto le-se na mesma, porque uma mochila sem item nenhum —
+     * so' com pokemon, que nao tem `alt` — e' um zero verdadeiro, e bloquear a primeira compra
+     * de sempre seria trocar um erro por outro.
      */
     async function abrirInventario() {
       if (!janelaInv()) {
@@ -233,8 +236,11 @@ PPX.modulo(
         for (let i = 0; i < 12 && !janelaInv(); i += 1) await esperar(250);
         if (!janelaInv()) return false;
       }
-      for (let i = 0; i < 24 && janelaInv() && !document.querySelectorAll('.inv-slot').length; i += 1)
-        await esperar(250);
+      const temNome = () =>
+        [...document.querySelectorAll('.inv-slot')].some((s) =>
+          (s.querySelector('img')?.alt || '').trim(),
+        );
+      for (let i = 0; i < 24 && janelaInv() && !temNome(); i += 1) await esperar(250);
       return !!janelaInv();
     }
 

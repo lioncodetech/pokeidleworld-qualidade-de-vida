@@ -258,20 +258,23 @@ Nunca se vende Lendária, Mítica, Anciã ou Divina. Na aba de itens, nunca se v
 Pack`, `Bronze Dimensional KEY`, `Devoted Token`, `Strange Pheromone`, qualquer `Shiny ... Card`,
 `Rare Pokemon Picture` nem `Bronze Boss Token`. A lista é fechada de propósito.
 
-**A mochila fecha-se sozinha enquanto se lê, e isso saía como zero.** Medido com o ciclo a
-correr em 28/10/2026: a mochila abriu com 30 slots e meio segundo depois estava fechada — o jogo
-fecha-a quando o personagem anda, tal como faz à loja. A leitura apanhava a janela ainda de pé e
-os slots já fora, e devolvia zero de tudo; saía *"Ultra Ball: 79492 → 0"* e a compra seguinte
-pedia 38 849 Ultra Balls que já estavam na bolsa. Agora confere-se a janela **depois** de ler: um
-item que falta é zero, mas uma mochila que fechou a meio não é zero de nada — é uma leitura que
-não vale. Zero slots, só por si, continua a poder ser uma mochila vazia de verdade, e por isso
-não serve de critério.
+**Um slot sem nome ainda não é um slot, e isso saía como zero.** Este custou três versões a
+acertar, e as duas primeiras explicações estavam erradas. O sintoma era sempre o mesmo:
+*"Ultra Ball: 79492 → 0 (+-79492)"*, com 79 mil Ultra Balls na bolsa, e a compra seguinte a pedir
+38 849 que já lá estavam — uma compra decidida sobre um zero inventado compra o que já se tem.
 
-**A mochila também abre antes de desenhar, e isso saía como zero.** A conferência que corre logo
-depois das compras encontrava a `.inv-window` já aberta e os `.inv-slot` ainda não, e o relatório
-final saía todo a zero: *"Ultra Ball: 79492 → 0 (+-79492)"*, com 79 mil Ultra Balls na mochila.
-Pior do que feio — uma compra decidida sobre esse zero compra o que já se tem. Agora espera-se
-pelos slots, e não só pela janela.
+A medição que o resolveu foi feita a cada 150 ms, em 29/10/2026, com a ferramenta a ler: aos
+**185 ms já existiam os 30 `.inv-slot` e nenhum com nome** — as imagens não tinham carregado e o
+`alt` estava vazio — e só aos **495 ms** é que 20 ganharam nome. A leitura caía nesse intervalo e
+não encontrava item nenhum. Por isso espera-se agora pelo **primeiro slot com nome**, que é o que
+a leitura procura, e não pela janela nem pelos slots.
+
+Esgotado o teto, lê-se na mesma: uma mochila só com pokémon não tem `alt` nenhum e é um zero
+verdadeiro, e bloquear a primeira compra de sempre seria trocar um erro por outro. Fica também o
+guarda que confere a janela **depois** de ler — uma mochila que fechou a meio não é zero de nada —
+mas foi preciso medir para perceber que não era esse o defeito: a janela está aberta o tempo
+todo, e o fecho que se via era a própria ferramenta, depois de ler. Zero slots, só por si, nunca
+serviu de critério: pode ser uma mochila vazia de verdade.
 
 **A lista da loja demora a desenhar, e zero linhas não é lista vazia.** Na primeira abertura da
 loja a aba dos Pokémon fica entre **2,2 e 2,7 segundos** sem nenhuma `.mks-row` — medido em

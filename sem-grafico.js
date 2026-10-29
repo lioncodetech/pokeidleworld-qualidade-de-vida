@@ -46,6 +46,24 @@
    */
   const QUADROS_ATE_PARAR = 60;
 
+  /**
+   * Quantas batidas se espera pelo motor antes de parar o desenho sem ter os quadros.
+   *
+   * O portao de cima conta quadros e supoe 30 por segundo — "dois segundos". Medido no jogo em
+   * 29/10/2026, com um F5 e a ferramenta ligada: o motor so' aparece ~8 s depois da carga e
+   * desenha devagar enquanto carrega, por isso chegar aos 60 quadros levou **~10 segundos**, e
+   * durante esses dez segundos o jogo desenhava a toda a velocidade com a ferramenta ligada. Quem
+   * carregava no Alt+G nesse intervalo via o aviso a dizer que parou e o jogo a continuar: uma
+   * ferramenta que mente le-se como uma ferramenta partida.
+   *
+   * Cinco batidas sao 2,5 s — o que o comentario de cima sempre quis dizer, agora contado num
+   * relogio que nao depende de quantos quadros o jogo consegue desenhar.
+   */
+  const BATIDAS_ATE_PARAR = 5;
+
+  /** Batidas desde que o motor existe. Nao conta as que correram sem ele: nao houve arranque. */
+  let batidasComMotor = 0;
+
   const PADRAO = { mundo: false, estatico: false };
 
   let cfg = { ...PADRAO };
@@ -90,7 +108,9 @@
   function cenaDePe() {
     const e = motor();
     if (!e) return false;
-    return typeof e.frameCount === 'number' ? e.frameCount >= QUADROS_ATE_PARAR : true;
+    if (typeof e.frameCount !== 'number') return true;
+    // Os quadros sao a prova boa; as batidas sao o tecto, para o caso de eles nao virem.
+    return e.frameCount >= QUADROS_ATE_PARAR || batidasComMotor >= BATIDAS_ATE_PARAR;
   }
 
   /**
@@ -200,7 +220,12 @@
     }
   }
 
-  setInterval(aplicar, BATIDA);
+  setInterval(() => {
+    // Contado aqui e nao dentro de `aplicar`: ela tambem corre a pedido, e uma tecla carregada
+    // cinco vezes nao e' tempo nenhum a passar.
+    if (motor()) batidasComMotor += 1;
+    aplicar();
+  }, BATIDA);
 
   // ------------------------------------------------------------------ o que se diz a quem olha
 

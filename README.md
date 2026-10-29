@@ -21,6 +21,17 @@ jogo para de se desenhar — a tela vira uma fotografia — mas **continua jogan
 18 segundos com zero quadros desenhados e o personagem andando o tempo todo. A caçada, a captura e
 o nível vêm do servidor, não do desenho. **Alt+H** devolve tudo.
 
+Depois de um F5 ela espera que a cena esteja de pé antes de parar o desenho — parar o motor a
+nascer deixa-o preso, e isso lê-se como avaria, não como ferramenta ligada. Essa espera contava
+**60 quadros**, supondo 30 por segundo, ou seja dois segundos. O jogo não os dá: medido em
+29/10/2026, 2,5 segundos depois de o motor nascer ele tinha desenhado **3 quadros**, e chegar aos
+60 levava **~10 segundos** — dez segundos de jogo a desenhar a toda a velocidade com a ferramenta
+ligada, e o Alt+G nesse intervalo mostrava o aviso a dizer que tinha parado enquanto o jogo
+continuava. Era isso que se lia como "não funciona". Agora os quadros continuam a valer, mas há um
+tecto de **2,5 segundos** contado nas batidas da própria ferramenta, que não depende de quantos
+quadros o jogo consegue desenhar. Medido com o tecto posto: para aos 3,4 s com 3 quadros, o jogo
+abre inteiro e o personagem continua a andar com o desenho parado.
+
 Ela faz mais duas coisas, e as duas vieram de medir o **modo Cartas**, onde o próprio jogo já para
 o desenho:
 

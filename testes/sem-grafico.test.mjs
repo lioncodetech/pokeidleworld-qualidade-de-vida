@@ -127,6 +127,9 @@ function montar({ motor = motorDeMentira(), guardado = null, animacoes = [], men
   };
 
   const mod = { exports: {} };
+  // O mundo da pagina, guardado para o poder trocar: o jogo nasce depois da ferramenta, e um
+  // motor que aparece a meio e' um caso que acontece a cada carga.
+  const mundo = { __engine: motor };
   new Function(
     'globalThis',
     'localStorage',
@@ -139,7 +142,7 @@ function montar({ motor = motorDeMentira(), guardado = null, animacoes = [], men
     'module',
     fonte,
   )(
-    { __engine: motor },
+    mundo,
     {
       getItem: (k) => loja[k] ?? null,
       setItem: (k, v) => {
@@ -179,6 +182,10 @@ function montar({ motor = motorDeMentira(), guardado = null, animacoes = [], men
     avisos: () => avisos.map((n) => n.textContent).filter(Boolean),
     /** A batida de 500 ms, que reaplica a escolha depois de o motor trocar de cena. */
     bater: () => relogio && relogio(),
+    /** O jogo a nascer depois da ferramenta, como acontece a cada carga da pagina. */
+    trocarMotor: (novo) => {
+      mundo.__engine = novo;
+    },
     tecla: (letra, extra = {}) =>
       (ouvintes.keydown || []).forEach((f) =>
         f({
@@ -570,4 +577,50 @@ test('para o nucleo ela e um efeito, e nao uma janela', () => {
     /modulos\.filter\(\(m\) => !m\.efeito && m\.aplicar/,
     'o Alt+Z deixou de filtrar por `efeito`: este teste ja nao defende nada',
   );
+});
+
+test('o jogo recem-carregado nao fica dez segundos a desenhar', () => {
+  // Medido no jogo em 29/10/2026, com F5 e a ferramenta ligada: o motor so' aparece ~8 s depois
+  // da carga e desenha devagar enquanto carrega, por isso chegar aos 60 quadros levou ~10 s. Dez
+  // segundos de desenho a toda a velocidade com a ferramenta ligada e' o que se lia como "nao
+  // funciona". O portao dos quadros supunha 30 por segundo; o jogo nao os da'.
+  const motor = motorDeMentira({ quadros: 0 });
+  const p = montar({ motor, guardado: { mundo: true, estatico: true } });
+  assert.equal(p.desenhando(), true, 'no primeiro instante ainda se espera pela cena');
+
+  // Quatro batidas sao 2 s: ainda dentro da espera, e o motor mal desenhou.
+  for (let i = 0; i < 4; i += 1) {
+    motor.frameCount += 2;
+    p.bater();
+  }
+  assert.equal(p.desenhando(), true, 'cedo demais para parar');
+
+  // A quinta e' o tecto: para mesmo sem os 60 quadros terem chegado.
+  motor.frameCount += 2;
+  p.bater();
+  assert.equal(p.desenhando(), false, 'ao fim de 2,5 s para, com ou sem quadros');
+  assert.ok(motor.frameCount < 60, 'e parou sem os quadros que o portao antigo exigia');
+});
+
+test('com quadros a chegar depressa, para sem esperar o tecto', () => {
+  // O tecto e' uma rede, nao o caminho normal: quem desenha a 30 quadros continua a parar em dois
+  // segundos, como antes.
+  const motor = motorDeMentira({ quadros: 0 });
+  const p = montar({ motor, guardado: { mundo: true, estatico: true } });
+  motor.frameCount = 60;
+  p.bater();
+  assert.equal(p.desenhando(), false, 'os quadros chegaram: nao ha nada a esperar');
+});
+
+test('sem motor, as batidas nao contam como arranque', () => {
+  // Uma pagina que ainda nao tem jogo nenhum nao esta' a "carregar ha' 2,5 s": quando o motor
+  // aparecer, ele tem direito ao mesmo tempo de pe' que teria numa carga normal.
+  const p = montar({ motor: null, guardado: { mundo: true, estatico: true } });
+  for (let i = 0; i < 10; i += 1) p.bater();
+  const motor = motorDeMentira({ quadros: 0 });
+  p.trocarMotor(motor);
+  p.bater();
+  assert.equal(motor.app.ticker.started, true, 'o motor acabou de nascer: ainda nao se para');
+  for (let i = 0; i < 4; i += 1) p.bater();
+  assert.equal(motor.app.ticker.started, false, 'e para quando o tempo dele passar');
 });
